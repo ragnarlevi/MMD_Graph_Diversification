@@ -5,7 +5,7 @@ import os, sys
 import tqdm
 # from pandas_datareader import data
 import networkx as nx
-sys.path.insert(0, 'C:/Users/User/Code/')
+sys.path.insert(0, 'C:/Users/User/Code/MMD_Graph_Diversification')
 from util import fetch_raw_data
 
 import pickle
@@ -13,7 +13,7 @@ import pickle
 from sklearn.covariance import graphical_lasso, GraphicalLasso, GraphicalLassoCV
 
 
-from sklearn.covariance import GraphicalLassoCV, 
+from sklearn.covariance import GraphicalLassoCV
 from sklearn.preprocessing import StandardScaler
 
 import warnings
@@ -21,7 +21,7 @@ import warnings
 
 from multiprocessing import Pool, freeze_support
 
-
+# Load R packages
 from rpy2.robjects.packages import importr
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
@@ -30,6 +30,7 @@ spectralGraphTopology = importr('spectralGraphTopology')
 igraph = importr('igraph')
 fingraph = importr('fingraph')
 fitHeavyTail = importr('fitHeavyTail')
+huge = importr('huge')
 
 
 # Define function that ignores degree constraints for the LGMRF. Note this is a R function
@@ -176,9 +177,42 @@ price_pivot, esg_pivot, sector_classification = fetch_raw_data("C:/Users/User/Co
 gp_esg_stock = pd.read_pickle('data/tidy/gp_esg_stock_data_frame.pkl')
 
 
+
+def create_G(A:np.array):
+  """
+  Label graph
+  A adjacency matrix as nx
+  """
+  G = nx.from_numpy_array(A)
+  # set sign labels
+  nx.set_edge_attributes(G, {(n1, n2): np.sign(val) for n1, n2, val in G.edges.data('weight')}, "sign")
+  nodes_degree = dict(G.degree)
+  # set degree as label
+  nx.set_node_attributes(G, {key: str(value) for key, value in nodes_degree.items()}, "label")
+  return G
+
+
+def div_ratio(w, cov):
+  # numerator is perfect correlation
+  # denom is portfolio risk
+  return np.inner(w, np.sqrt(np.diag(cov)))/np.sqrt(np.dot(w, cov).dot(w))
+
+def var_div_ratio(w,data, q = 0.95):
+  # w weights
+  # d = data
+
+  ind_var = []
+  for col in range(data.shape[1]):
+      ind_var.append(np.quantile(-data[:,col], q))
+
+  port_var = np.quantile(np.dot(-data, w), q)
+
+  return port_var/np.inner(ind_var,w)
+
+
 # function to estimate covariance, and graphs
 
-def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150, nr_splits = 3 ):
+def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150, nr_splits = 3, graph_estimation = "lgmrf_heavy", scale = 'normal'):
   """
   Parameters
   ------------------------------
@@ -190,17 +224,37 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
   window_size: rolliwng window size. 
   nr_splits: How many splits to consdier the esg data. If 3 then the stocks will be splits into 3 categories, good, medium and bad. 
   Group number 0 containes the lowest esg scores
+  graph_estimation:
+  scale: if None no scaling
 
   """
-
-  # Generate Graphs
+  # information stored in dictionaries
   stocks_considered= dict()
   graph_dict = {i: [] for i in range(nr_splits)}
   max_sharpe_portfolio_dict = {i: [] for i in range(nr_splits)}
   GMV_portfolio_dict = {i: [] for i in range(nr_splits)}
   return_dict  = {i: [] for i in range(nr_splits)}
   cov_dict = {i: [] for i in range(nr_splits)}
+  gmv_div_dict = {i: [] for i in range(nr_splits)}
+  gmv_var_div_dict = {i: [] for i in range(nr_splits)}
+  sharpe_div_dict = {i: [] for i in range(nr_splits)}
+  sharpe_var_div_dict = {i: [] for i in range(nr_splits)}
+  uni_div_dict = {i: [] for i in range(nr_splits)}
+  uni_var_div_dict = {i: [] for i in range(nr_splits)}
 
+  max_sharpe_portfolio_dict2 = {i: [] for i in range(nr_splits)}
+  GMV_portfolio_dict2 = {i: [] for i in range(nr_splits)}
+  return_dict2  = {i: [] for i in range(nr_splits)}
+  cov_dict2 = {i: [] for i in range(nr_splits)}
+  gmv_div_dict2 = {i: [] for i in range(nr_splits)}
+  gmv_var_div_dict2 = {i: [] for i in range(nr_splits)}
+  sharpe_div_dict2 = {i: [] for i in range(nr_splits)}
+  sharpe_var_div_dict2 = {i: [] for i in range(nr_splits)}
+  uni_div_dict2 = {i: [] for i in range(nr_splits)}
+  uni_var_div_dict2 = {i: [] for i in range(nr_splits)}
+
+  stock_partition = {i: [] for i in range(nr_splits)}
+  
   dates4 = []
 
   for i in tqdm.tqdm(range(window_size, price_df.shape[0], 2)):
@@ -250,60 +304,133 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
       # select the stocks in this split and only select the time for this rolling window
       stock_split_i = price_df[stocks_ordered_i[stocks_index]].iloc[(i-window_size):i]
 
+      stock_partition[i_split].append(stocks_ordered_i[stocks_index])
+
       if i == window_size and i_split == 0:
         print(f"First iteration of {k}. Shape is {stock_split_i.shape}")
 
-
-      scaler = StandardScaler()
-      X = scaler.fit_transform(stock_split_i)
-      from sklearn.covariance import LedoitWolf
-      cov_lw = LedoitWolf().fit(X)
-      S = cov_lw.covariance_# np.exp(stock_split_i).cov()
-      cov_dict[i_split].append(S)
-      mu = np.exp(stock_split_i).mean()-1
-      return_dict[i_split].append(mu)
+      X = np.array(stock_split_i)
+      var = np.diag(np.cov(X.T))
+      if scale == 'normal':
+        scaler = StandardScaler()
+        X = scaler.fit_transform(X)
       
-      # GMV
-      w_gmv = np.dot(np.linalg.inv(S), np.ones(S.shape[0]))/np.dot(np.ones(S.shape[0]), np.linalg.inv(S)).dot(np.ones(S.shape[0])) 
-      GMV_portfolio_dict[i_split].append(w_gmv)
-      # SHARPE
-      w_sharpe = np.dot(np.linalg.inv(S), mu)/np.dot(np.ones(S.shape[0]), np.linalg.inv(S)).dot(mu)
-      max_sharpe_portfolio_dict[i_split].append(w_sharpe)
-
-      # Find nu for multivariate t-student
-      out_fit_mvt = fitHeavyTail.fit_mvt(X,nu="MLE-diag-resample")
-      out_fit_mvt = dict(zip(out_fit_mvt.names, list(out_fit_mvt)))
-
 
       try:
-        if d == 0:
-          out_heavy_no_constraint = learn_heavy_connected_graph(X, heavy_type = "student", nu = out_fit_mvt['nu'][0], verbose = False)
-          out_heavy_no_constraint = dict(zip(out_heavy_no_constraint.names, list(out_heavy_no_constraint)))
-          G_no_const = nx.from_numpy_array(out_heavy_no_constraint['adjacency'])
-          graph_dict[i_split].append(G_no_const)
-        else:
-          out_fingraph = fingraph.learn_regular_heavytail_graph(X, heavy_type = "student", nu = out_fit_mvt['nu'][0], d=d, verbose = False)
-          out_fingraph = dict(zip(out_fingraph.names, list(out_fingraph)))
-          G_d = nx.from_numpy_array(out_fingraph['adjacency'])
-          graph_dict[i_split].append(G_d)
+        if graph_estimation == 'lgmrf_heavy':
+          # Find nu for multivariate t-student
+          out_fit_mvt = fitHeavyTail.fit_mvt(X,nu="MLE-diag-resample")
+          out_fit_mvt = dict(zip(out_fit_mvt.names, list(out_fit_mvt)))
+          if d == 0:
+            out = learn_heavy_connected_graph(X, heavy_type = "student", nu = out_fit_mvt['nu'][0], verbose = False)
+            out = dict(zip(out.names, list(out)))
+            precision_matrix = out['laplacian']
+            G = create_G(out['adjacency'])
+            graph_dict[i_split].append(G)
+          else:
+            out = fingraph.learn_regular_heavytail_graph(X, heavy_type = "student", nu = out_fit_mvt['nu'][0], d=d, verbose = False)
+            out = dict(zip(out.names, list(out)))
+            precision_matrix = out['laplacian']
+            G = create_G(out['adjacency'])
+            graph_dict[i_split].append(G)
+
+        elif graph_estimation == 'lgmrf_normal':
+          out = fingraph.learn_regular_heavytail_graph(X, heavy_type = "gaussian", d=d, verbose = False)
+          out = dict(zip(out.names, list(out)))
+          precision_matrix = out['laplacian']
+          G = create_G(out['adjacency'])
+          graph_dict[i_split].append(G)
+
+        elif graph_estimation == 'sklearn_glasso':
+          glasso = GraphicalLassoCV(cv=3).fit(X)
+          precision_matrix = glasso.precision_
+          precision_matrix_no_diag = precision_matrix.copy()
+          np.fill_diagonal(precision_matrix_no_diag,0)
+          G = create_G(-precision_matrix_no_diag)
+          graph_dict[i_split].append(G)
+        elif graph_estimation == 'huge_glasso_ebic':
+          out = huge.huge(X, method = 'glasso', nlambda = 30,verbose = False)
+          out_select = huge.huge_select(out, criterion = "ebic", stars_thresh = 0.1, rep_num = 10 )
+          out_select = dict(zip(out_select.names, list(out_select)))
+          precision_matrix = out_select['opt.icov'].copy()
+          precision_matrix_no_diag = precision_matrix.copy()
+          np.fill_diagonal(precision_matrix_no_diag,0)
+          G = create_G(-precision_matrix_no_diag)
+          graph_dict[i_split].append(G)
+
+
 
       except:
-          # remove all graphs from this time point if there is a graph estimation failure for one of the splits.
-          # To make sure the graphs are pairwise ordered correctly
-          for remove_i in range(i_split):
-            graph_dict[remove_i].pop(-1)
-            max_sharpe_portfolio_dict[remove_i].pop(-1)
-            GMV_portfolio_dict[remove_i].pop(-1)
-            return_dict[remove_i].pop(-1)
-            cov_dict[remove_i].pop(-1)
+        # remove all graphs from this time point if there is a graph estimation failure for one of the splits.
+        # To make sure the graphs are pairwise ordered correctly
+        for remove_i in range(i_split):
+          graph_dict[remove_i].pop(-1)
 
-
-          dates4.pop(-1)
-
-          break
+          # max_sharpe_portfolio_dict[remove_i].pop(-1)
+          # GMV_portfolio_dict[remove_i].pop(-1)
+          # return_dict[remove_i].pop(-1)
+          # cov_dict[remove_i].pop(-1)
           
+          # gmv_div_dict[remove_i].pop(-1)
+          # gmv_var_div_dict[remove_i].pop(-1)
+          # sharpe_div_dict[remove_i].pop(-1)
+          # sharpe_var_div_dict[remove_i].pop(-1)
+          # uni_div_dict[remove_i].pop(-1)
+          # uni_var_div_dict[remove_i].pop(-1)
 
+          # stock_partition[remove_i].pop(-1)
 
+        dates4.pop(-1)
+        break
+
+      #scaler = StandardScaler()
+      if graph_estimation == 'lgmrf_heavy' or graph_estimation == 'lgmrf_normal':
+        precision_matrix = precision_matrix + 0.001*np.identity(precision_matrix.shape[0])
+      
+
+      # Calculate diversification using graph estimate
+      S = np.linalg.inv(precision_matrix)
+      cov_dict[i_split].append(S)
+      mu = stock_split_i.mean()
+      return_dict[i_split].append(mu)
+
+      # GMV diversification
+      w_gmv = np.dot(precision_matrix, np.ones(S.shape[0]))/np.dot(np.ones(S.shape[0]), precision_matrix).dot(np.ones(S.shape[0])) 
+      GMV_portfolio_dict[i_split].append(w_gmv)
+      gmv_div_dict[i_split].append(div_ratio(w_gmv,S))
+      gmv_var_div_dict[i_split].append(var_div_ratio(w_gmv,X))
+      # SHARPE
+      w_sharpe = np.dot(precision_matrix, mu)/np.dot(np.ones(S.shape[0]), precision_matrix).dot(mu)
+      max_sharpe_portfolio_dict[i_split].append(w_sharpe)
+      sharpe_div_dict[i_split].append(div_ratio(w_sharpe,S))
+      sharpe_var_div_dict[i_split].append(var_div_ratio(w_sharpe,X))
+      # Uniform
+      w_uni = np.ones(S.shape[1])/S.shape[1]
+      uni_div_dict[i_split].append(div_ratio(w_uni,S))
+      uni_var_div_dict[i_split].append(var_div_ratio(w_uni,X))
+
+      # Calculate diversification by turning correlation back to covariance
+      S = np.dot(np.diag(var), np.linalg.inv(precision_matrix)).dot(np.diag(var))
+      precision_matrix = np.linalg.inv(precision_matrix)
+      cov_dict2[i_split].append(S)
+      mu = stock_split_i.mean()
+      return_dict2[i_split].append(mu)
+
+      # GMV diversification
+      w_gmv = np.dot(precision_matrix, np.ones(S.shape[0]))/np.dot(np.ones(S.shape[0]), precision_matrix).dot(np.ones(S.shape[0])) 
+      GMV_portfolio_dict2[i_split].append(w_gmv)
+      gmv_div_dict2[i_split].append(div_ratio(w_gmv,S))
+      gmv_var_div_dict2[i_split].append(var_div_ratio(w_gmv,X))
+      # SHARPE
+      w_sharpe = np.dot(precision_matrix, mu)/np.dot(np.ones(S.shape[0]), precision_matrix).dot(mu)
+      max_sharpe_portfolio_dict2[i_split].append(w_sharpe)
+      sharpe_div_dict2[i_split].append(div_ratio(w_sharpe,S))
+      sharpe_var_div_dict2[i_split].append(var_div_ratio(w_sharpe,X))
+      # Uniform
+      w_uni = np.ones(S.shape[1])/S.shape[1]
+      uni_div_dict2[i_split].append(div_ratio(w_uni,S))
+      uni_var_div_dict2[i_split].append(var_div_ratio(w_uni,X))
+          
   dates = np.array(dates4)
 
   assert len(graph_dict[0]) == len(graph_dict[1]), f"{k} 0 and 1 not same"
@@ -311,29 +438,39 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
   assert len(graph_dict[1]) == len(graph_dict[2]), f"{k} 1 and 2 not same"
 
 
-
-
   return {'dates':dates, 'graph_dict':graph_dict, 'sector':k, 'cov_dict':cov_dict, 
   'GMV_portfolio_dict':GMV_portfolio_dict, 'max_sharpe_portfolio_dict':max_sharpe_portfolio_dict,
-  'return_dict':return_dict, 'window_size':window_size}
-
-
+  'return_dict':return_dict, 'window_size':window_size, 'stock_partition':stock_partition, 'gmv_div_dict':gmv_div_dict,
+  'gmv_var_div_dict':gmv_var_div_dict, 'sharpe_div_dict':sharpe_div_dict, 'sharpe_var_div_dict':sharpe_var_div_dict,
+  'uni_div_dict':uni_div_dict, 'uni_var_div_dict':uni_var_div_dict,'cov_dict2':cov_dict2, 
+  'GMV_portfolio_dict2':GMV_portfolio_dict2, 'max_sharpe_portfolio_dict2':max_sharpe_portfolio_dict2,
+  'return_dict2':return_dict2,  'gmv_div_dict2':gmv_div_dict2,
+  'gmv_var_div_dict2':gmv_var_div_dict2, 'sharpe_div_dict2':sharpe_div_dict2, 'sharpe_var_div_dict2':sharpe_var_div_dict2,
+  'uni_div_dict2':uni_div_dict2, 'uni_var_div_dict2':uni_var_div_dict2}
 
 
 if __name__ == '__main__':
 
+  d = 1
+  winow_len = 300
+  graph_estimation = 'huge_glasso_ebic'
+  scale = None
 
-  with Pool(4) as pool:
+  print(graph_estimation)
+  print(winow_len)
+  print(scale)
+  
+  with Pool(1) as pool:
     L = pool.starmap(graph_est, [(price_pivot.loc[:, np.isin(price_pivot.columns,sector_classification[k])], 
-                                    gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,sector_classification[k])], 
-                                    sector_classification[k], 
+                                  gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,sector_classification[k])], 
+                                  sector_classification[k], 
                                     k, 
-                                    2,
-                                    150, 
-                                    3) for k in sector_classification.keys()])#sector_classification.keys()
+                                    d,
+                                    winow_len, 
+                                    3,
+                                    graph_estimation) for k in ['Industrials']])#sector_classification.keys()
 
-    
-  with open(f'data/paper/graph_construct_case_study_1_d_2_rw_weight_days_150.pkl', 'wb') as f:
+  with open(f'data/Graphs/case_study_1_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}.pkl', 'wb') as f:
     pickle.dump(L, f)
 
 
