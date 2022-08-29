@@ -350,15 +350,13 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
           graph_dict[i_split].append(G)
         elif graph_estimation == 'huge_glasso_ebic':
           out = huge.huge(X, method = 'glasso', nlambda = 30,verbose = False)
-          out_select = huge.huge_select(out, criterion = "ebic", stars_thresh = 0.1, rep_num = 10 )
+          out_select = huge.huge_select(out, criterion = "ebic" )
           out_select = dict(zip(out_select.names, list(out_select)))
           precision_matrix = out_select['opt.icov'].copy()
           precision_matrix_no_diag = precision_matrix.copy()
           np.fill_diagonal(precision_matrix_no_diag,0)
           G = create_G(-precision_matrix_no_diag)
           graph_dict[i_split].append(G)
-
-
 
       except:
         # remove all graphs from this time point if there is a graph estimation failure for one of the splits.
@@ -387,7 +385,6 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
       if graph_estimation == 'lgmrf_heavy' or graph_estimation == 'lgmrf_normal':
         precision_matrix = precision_matrix + 0.001*np.identity(precision_matrix.shape[0])
       
-
       # Calculate diversification using graph estimate
       S = np.linalg.inv(precision_matrix)
       cov_dict[i_split].append(S)
@@ -454,7 +451,7 @@ if __name__ == '__main__':
   d = 1
   winow_len = 300
   graph_estimation = 'huge_glasso_ebic'
-  scale = None
+  scale = 'normal'
 
   print(graph_estimation)
   print(winow_len)
