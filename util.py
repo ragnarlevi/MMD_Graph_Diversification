@@ -140,8 +140,10 @@ def plot_G_density(graphs:dict, rolling_window = 5, ax = None, graph_index = 'gr
     ax.legend()
 
 
+
 def cnt_pos_neg(G, pos = 1):
     return len([(edge[0], edge[1]) for edge in G.edges(data = 'sign') if edge[2] == pos])
+
 
 
 def plot_G_signs(graphs:dict, rolling_window = 5, ax = None, graph_index = 'graph_dict'):
@@ -162,4 +164,34 @@ def plot_G_signs(graphs:dict, rolling_window = 5, ax = None, graph_index = 'grap
         ax.plot(graphs['dates'], pd.DataFrame(negative[i]).rolling(rolling_window).mean().iloc[:,0], label = str(i) + " " + "negative", color = color_dark[i])
 
     ax.set_title(f'Sign count for {graphs["sector"]}')
+    ax.legend()
+
+
+def sign_weight_degree(G):
+    A = nx.adjacency_matrix(G, weight = 'weight').todense()
+    A[A<=0] = 0.0
+    d_pos = np.mean(np.sum(A, axis=1))
+
+    A = nx.adjacency_matrix(G, weight = 'weight').todense()
+    A[A>=0] = 0.0
+    d_neg = np.mean(np.sum(A, axis=1))
+
+    return d_pos, d_neg
+
+
+def plot_weight_signs(graphs:dict, rolling_window = 5, ax = None, graph_index = 'graph_dict'):
+
+    positive = {}
+    negative = {}
+
+    nr_splits = len(graphs[graph_index])
+    if ax is None:
+        _, ax = plt.subplots(1,1, figsize = (20,5))
+    for i in range(nr_splits):
+        positive[i] = [sign_weight_degree(graphs[graph_index][i][j])[0] for j in range(len(graphs[graph_index][i]))]
+        negative[i] = [sign_weight_degree(graphs[graph_index][i][j])[1] for j in range(len(graphs[graph_index][i]))]
+        ax.plot(graphs['dates'], pd.DataFrame(positive[i]).rolling(rolling_window).mean().iloc[:,0], label = str(i) + " " + "positive", color = color_light[i])
+        ax.plot(graphs['dates'], pd.DataFrame(negative[i]).rolling(rolling_window).mean().iloc[:,0], label = str(i) + " " + "negative", color = color_dark[i])
+
+    ax.set_title(f'Weighted Sign degree for {graphs["sector"]}')
     ax.legend()
