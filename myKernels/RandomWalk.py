@@ -1,6 +1,6 @@
 """
 
-fast Random walk kernels: See http://www.cs.cmu.edu/~ukang/papers/fast_rwgk.pdf
+fast Random walk kernels algorithm from http://www.cs.cmu.edu/~ukang/papers/fast_rwgk.pdf
 """
 
 
@@ -125,10 +125,14 @@ class RandomWalk():
                 if U_list[i] is None:
                     W_row_normalize = self._row_normalized_adj(self.X[i], edge_attr = edge_attr)
                     U_list[i], Lamda_list[i], Vt_list[i] = randomized_svd(W_row_normalize.T, n_components= r)
+                    if np.any(np.concatenate(Lamda_list[i])== 0.0):
+                        raise ValueError("zero eigenvalue.")
 
                 if U_list[j] is None:
                     W_row_normalize = self._row_normalized_adj(self.X[j], edge_attr = edge_attr)
                     U_list[j], Lamda_list[j], Vt_list[j] = randomized_svd(W_row_normalize.T, n_components= r)
+                    if np.any(np.concatenate(Lamda_list[j])== 0.0):
+                        raise ValueError("zero eigenvalue.")
 
                 if (self.p is None) and (self.q is None):
                     p1 = np.ones((self.X[i].number_of_nodes())) / float(self.X[i].number_of_nodes())
@@ -167,7 +171,7 @@ class RandomWalk():
 
         return K
 
-    def fit_ARKU_edge(self, r, edge_labels, verbose = True ):
+    def fit_ARKU_edge(self, r, edge_labels, edge_attr = None, verbose = True, edge_label_tag = 'sign' ):
         """
         Approximate random walk kernel for edge labelled graph and asymmetric W where W is the (weighted) adjacency matrix.
         
@@ -200,11 +204,15 @@ class RandomWalk():
             for j in range(i,self.N):
                 
                 if Lamda_list[i][0] is None:
-                    all_A = self._get_label_adj(self.X[i].copy(), edge_labels)
+                    all_A = self._get_label_adj(self.X[i].copy(), edge_labels,edge_label_tag, edge_attr)
                     Lamda_list[i], U_list[i] = self._eigen_decomp(all_A, r)
+                    if np.any(np.concatenate(Lamda_list[i])== 0.0) :
+                        raise ValueError("zero eigenvalue, probably too few edge labels for one class.")
                 if Lamda_list[j][0] is None:
-                    all_A = self._get_label_adj(self.X[j].copy(), edge_labels)
+                    all_A = self._get_label_adj(self.X[j].copy(), edge_labels,edge_label_tag, edge_attr)
                     Lamda_list[j], U_list[j] = self._eigen_decomp(all_A, r)
+                    if np.any(np.concatenate(Lamda_list[j])== 0.0):
+                        raise ValueError("zero eigenvalue, probably too few edge labels for one class.")
 
 
                 if (self.p is None) and (self.q is None):
@@ -258,7 +266,6 @@ class RandomWalk():
         """
 
         nr_labels = len(u1)
-        print(w1)
 
         # Create the label eigenvalue (block) diagonal matrix
         diag_inverse = [] 
@@ -308,9 +315,13 @@ class RandomWalk():
                     if all_A[i] is None:
                         all_A[i] = self._normalized_adj(self.X[i], edge_attr = edge_attr)
                         Lamda_list[i], U_list[i] = eigsh(all_A[i].T, k = r)
+                    if np.any(np.concatenate(Lamda_list[i])== 0.0):
+                        raise ValueError("zero eigenvalue.")
                     if all_A[j] is None:
                         all_A[j] = self._normalized_adj(self.X[j], edge_attr = edge_attr)
                         Lamda_list[j], U_list[j] = eigsh(all_A[j].T, k = r)
+                    if np.any(np.concatenate(Lamda_list[j])== 0.0):
+                        raise ValueError("zero eigenvalue.")
                 else:
                     if all_A[i] is None:
                         all_A[i] = self._get_adj_matrix(self.X[i], edge_attr = edge_attr)
@@ -933,7 +944,7 @@ class RandomWalk():
         return L
 
 
-    def _get_label_adj(self, G, edge_labels, edge_labels_tag = 'sign'):
+    def _get_label_adj(self, G, edge_labels, edge_labels_tag = 'sign', edge_attr = None):
         """
 
         Filter the adjacency matrix according to each label in edge_labels, w if edges have same label, 0 otherwise
@@ -951,19 +962,17 @@ class RandomWalk():
         
         """
 
-        edge_attrs = nx.get_edge_attributes(G, edge_labels_tag)
+        edge_attrs = nx.get_edge_attributes(G, edge_labels_tag )
 
         A = [None] * len(edge_labels)  # Store filtered adjacency matrices 
 
-        edges = [k for k, v in edge_attrs.items() if v == 1]
-        edges
         for idx, label in enumerate(edge_labels):
             G_tmp = G.copy()
             for k, v in edge_attrs.items():
-                if v == label:
+                if v != label:
                     G_tmp.remove_edge(k[0], k[1])
 
-            A[idx] = scipy.sparse.csr_matrix(nx.linalg.adjacency_matrix(G_tmp), dtype=np.float64)
+            A[idx] = scipy.sparse.csr_matrix(np.abs(nx.linalg.adjacency_matrix(G_tmp, weight = edge_attr)), dtype=np.float64)
         
         return A
 

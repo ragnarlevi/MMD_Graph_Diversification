@@ -32,7 +32,7 @@ import GraphStatKernel
 import WWL
 
 
-def graph_test(n, graph_dict, k, dates, B, edge_attr = 'weight',day_step = 1, graph_label = None, weight_fun = None):
+def graph_test(n, graph_dict, k, dates, B, edge_attr = 'weight',day_step = 1, graph_label = None, weight_fun = None, c = 0.001):
     """
     n - number of samples
     graph_dict - graph_dict contained in the list from output from Generate_graphs_case_1
@@ -50,8 +50,8 @@ def graph_test(n, graph_dict, k, dates, B, edge_attr = 'weight',day_step = 1, gr
 
 
     esg_return_df = pd.DataFrame()
-    for group_1 in [0]:#:range(nr_splits):
-        for group_2 in [1, 2]:#range(group_1+1, nr_splits):
+    for group_1 in [0]:#range(nr_splits):
+        for group_2 in [2]:#range(group_1+1, nr_splits):
             pbar = tqdm.tqdm( total=len(list(range(n, len(graph_dict[group_1]), day_step))))
             for cnt, i in enumerate(range(n, len(graph_dict[group_1]), day_step)):
                 # print(i-cnt)
@@ -65,37 +65,24 @@ def graph_test(n, graph_dict, k, dates, B, edge_attr = 'weight',day_step = 1, gr
 
                 
                 if graph_label is None:
-                    calc_ok = True
-                    for c in [0.0001, 0.00001, 0.000001]:
+                    rw_kernel = rw.RandomWalk(Gs, c = c, normalize=0)
+                    K = rw_kernel.fit_ARKU_plus(r = r, normalize_adj=False, verbose=False, edge_attr = edge_attr)
 
-                        rw_kernel = rw.RandomWalk(Gs, c = c, normalize=0)
-                        K = rw_kernel.fit_ARKU_plus(r = r, normalize_adj=False, verbose=False, edge_attr = edge_attr)
-
-                        v,_ = np.linalg.eigh(K)
-                        v[np.abs(v) < 10e-5] = 0
-                        if np.all(v>= 0):
-                            calc_ok = True
-                            break
-                        calc_ok = False
-
-                    if calc_ok != True:
-                        print(f"{k} Kernel not psd")
+                    v,_ = np.linalg.eigh(K)
+                    v[np.abs(v) < 10e-5] = 0
+                    if np.any(v < -10e-5):
+                        raise ValueError("Not psd")
                 elif graph_label == 'signed':
-                    calc_ok = True
-                    for c in [0.1, 0.01, 0.001, 0.0001, 0.00001, 0.000001]:
 
-                        rw_kernel = rw.RandomWalk(Gs, c = c, normalize=0)
-                        K = rw_kernel.fit_ARKU_edge(r = r, edge_labels = [1,-1], verbose=False)
 
-                        v,_ = np.linalg.eigh(K)
-                        v[np.abs(v) < 10e-5] = 0
-                        if np.all(v>=0):
-                            calc_ok = True
-                            break
-                        calc_ok = False
+                    rw_kernel = rw.RandomWalk(Gs, c = c, normalize=0)
+                    K = rw_kernel.fit_ARKU_edge(r = r, edge_labels = [1,-1], verbose=False)
 
-                    if calc_ok != True:
-                        print(f"{k} Kernel not psd")
+                    v,_ = np.linalg.eigh(K)
+                    v[np.abs(v) < 10e-5] = 0
+                    if np.any(v < -10e-5):
+                        raise ValueError("Not psd")
+
                 else:
                     ValueError(f"Check if graph_type is written correctly")
 
@@ -121,6 +108,7 @@ def graph_test(n, graph_dict, k, dates, B, edge_attr = 'weight',day_step = 1, gr
                 info_dict['r'] = r
                 info_dict['c'] = c
                 info_dict['dates'] = dates[i]
+                info_dict['dates_mid'] = dates[int((i+(i-n))/2)]
 
 
                 esg_return_df = pd.concat((esg_return_df, pd.DataFrame(info_dict, index = [0])), ignore_index=True)
@@ -137,15 +125,18 @@ if __name__ == '__main__':
     d = 1
     winow_len = 300
     graph_estimation = 'huge_glasso_ebic'
-    edge_attr = 'weight'
-    scale = None
-    n = 30
+    edge_attr = None
+
+    n = 20
     day_step = 10
     graph_label = None
     weight_fun = None
     B = 5000
+    study = 'TEST'
 
-    file = f'data/Graphs/case_study_1_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}.pkl'
+    transform = None
+    scale = True
+    file = f'data/Graphs/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl'
     print(file)
 
     with open(file, 'rb') as f:
@@ -160,8 +151,79 @@ if __name__ == '__main__':
                                         edge_attr,
                                         day_step,
                                         graph_label,
-                                        weight_fun) for i in [0] ])#range(len(data_dict))])
+                                        weight_fun,
+                                        1e-3) for i in [0] ])#range(len(data_dict))])
 
     
-    with open(f'data/mmd_test/case_study_1_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_n_{n}_B_{B}_rw_{edge_attr}_dstep_{day_step}_glabel_{graph_label}_wfun_{weight_fun}.pkl', 'wb') as f:
+    with open(f'data/mmd_test/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}_n_{n}_B_{B}_rw_{edge_attr}_dstep_{day_step}_glabel_{graph_label}_wfun_{weight_fun}.pkl', 'wb') as f:
+        pickle.dump(L, f)
+
+
+
+    transform = 'nonparanormal'
+    scale = True
+    file = f'data/Graphs/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl'
+    with open(file, 'rb') as f:
+        data_dict = pickle.load(f)
+
+
+    with Pool(1) as pool:
+        L = pool.starmap(graph_test, [(n, data_dict[i]['graph_dict'], 
+                                        data_dict[i]['sector'], 
+                                        data_dict[i]['dates'],
+                                        B,
+                                        edge_attr,
+                                        day_step,
+                                        graph_label,
+                                        weight_fun,
+                                        1e-3) for i in [0] ])#range(len(data_dict))])
+
+    
+    with open(f'data/mmd_test/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}_n_{n}_B_{B}_rw_{edge_attr}_dstep_{day_step}_glabel_{graph_label}_wfun_{weight_fun}.pkl', 'wb') as f:
+        pickle.dump(L, f)
+
+
+    transform = 'nonparanormal'
+    scale = False
+    file = f'data/Graphs/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl'
+    with open(file, 'rb') as f:
+        data_dict = pickle.load(f)
+
+
+    with Pool(1) as pool:
+        L = pool.starmap(graph_test, [(n, data_dict[i]['graph_dict'], 
+                                        data_dict[i]['sector'], 
+                                        data_dict[i]['dates'],
+                                        B,
+                                        edge_attr,
+                                        day_step,
+                                        graph_label,
+                                        weight_fun,
+                                        1e-3) for i in [0] ])#range(len(data_dict))])
+
+    
+    with open(f'data/mmd_test/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}_n_{n}_B_{B}_rw_{edge_attr}_dstep_{day_step}_glabel_{graph_label}_wfun_{weight_fun}.pkl', 'wb') as f:
+        pickle.dump(L, f)
+
+
+    transform = None
+    scale = False
+    file = f'data/Graphs/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl'
+    with open(file, 'rb') as f:
+        data_dict = pickle.load(f)
+
+
+    with Pool(1) as pool:
+        L = pool.starmap(graph_test, [(n, data_dict[i]['graph_dict'], 
+                                        data_dict[i]['sector'], 
+                                        data_dict[i]['dates'],
+                                        B,
+                                        edge_attr,
+                                        day_step,
+                                        graph_label,
+                                        weight_fun,
+                                        1e-3) for i in [0] ])#range(len(data_dict))])
+
+    
+    with open(f'data/mmd_test/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}_n_{n}_B_{B}_rw_{edge_attr}_dstep_{day_step}_glabel_{graph_label}_wfun_{weight_fun}.pkl', 'wb') as f:
         pickle.dump(L, f)

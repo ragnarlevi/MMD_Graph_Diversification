@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import datetime
 import os, sys
+import warnings
 import tqdm
 # from pandas_datareader import data
 import networkx as nx
@@ -15,6 +16,8 @@ from sklearn.covariance import graphical_lasso, GraphicalLasso, GraphicalLassoCV
 
 from sklearn.covariance import GraphicalLassoCV
 from sklearn.preprocessing import StandardScaler
+from statsmodels.distributions.empirical_distribution import ECDF
+import scipy.integrate as integrate
 
 import warnings
 
@@ -167,6 +170,184 @@ compute_augmented_lagrangian_ht <- function(w, LstarSq, Theta, J, Y, y, d, heavy
 ''')
 
 
+
+robjects.r('''
+
+library(huge)
+
+huge.glasso = function(x, scale = FALSE, lambda = NULL, lambda.min.ratio = NULL, nlambda = NULL, scr = NULL, cov.output = FALSE, verbose = TRUE){
+
+  gcinfo(FALSE)
+  n = nrow(x)
+  d = ncol(x)
+  cov.input = isSymmetric(x)
+  if(cov.input)
+  {
+    if(verbose) cat("The input is identified as the covariance matrix.\n")
+    S = x
+  }
+  else
+  {
+    if(scale){
+      print("SCALE")
+      x = scale(x)
+    S = cor(x)
+    }else{
+    print("my_method")
+    S = cov(x)
+    }
+
+  }
+  rm(x)
+  gc()
+  if(is.null(scr)) scr = FALSE
+  if(!is.null(lambda)) nlambda = length(lambda)
+  if(is.null(lambda))
+  {
+    if(is.null(nlambda))
+      nlambda = 10
+    if(is.null(lambda.min.ratio))
+      lambda.min.ratio = 0.1
+    lambda.max = max(max(S-diag(d)),-min(S-diag(d)))
+    lambda.min = lambda.min.ratio*lambda.max
+    lambda = exp(seq(log(lambda.max), log(lambda.min), length = nlambda))
+  }
+
+  fit = .Call("_huge_hugeglasso",S,lambda,scr,verbose,cov.output,PACKAGE="huge")
+
+  fit$scr = scr
+  fit$lambda = lambda
+  fit$cov.input = cov.input
+  fit$cov.output = cov.output
+
+  rm(S)
+  gc()
+  if(verbose){
+       cat("\nConducting the graphical lasso (glasso)....done.                                          \r")
+       cat("\n")
+      flush.console()
+  }
+  return(fit)
+}
+
+huge = function(x, scale = scale, lambda = NULL, nlambda = NULL, lambda.min.ratio = NULL, method = "mb", scr = NULL, scr.num = NULL, cov.output = FALSE, sym = "or", verbose = TRUE)
+{
+	gcinfo(FALSE)
+	est = list()
+	est$method = method
+
+	if(method == "ct")
+	{
+		fit = huge.ct(x, nlambda = nlambda, lambda.min.ratio = lambda.min.ratio, lambda = lambda, verbose = verbose)
+		est$path = fit$path
+		est$lambda = fit$lambda
+		est$sparsity = fit$sparsity
+		est$cov.input = fit$cov.input
+		rm(fit)
+		gc()
+	}
+
+	if(method == "mb")
+	{
+		fit = huge.mb(x, lambda = lambda, nlambda = nlambda, lambda.min.ratio = lambda.min.ratio, scr = scr, scr.num = scr.num, sym = sym, verbose = verbose)
+		est$path = fit$path
+		est$beta = fit$beta
+		est$lambda = fit$lambda
+		est$sparsity = fit$sparsity
+		est$df = fit$df
+		est$idx_mat = fit$idx_mat
+		est$sym = sym
+		est$scr = fit$scr
+		est$cov.input = fit$cov.input
+		rm(fit,sym)
+		gc()
+	}
+
+
+	if(method == "glasso")
+	{
+		fit = huge.glasso(x, scale = scale, nlambda = nlambda, lambda.min.ratio = lambda.min.ratio, lambda = lambda, scr = scr, cov.output = cov.output, verbose = verbose)
+		est$path = fit$path
+		est$lambda = fit$lambda
+		est$icov = fit$icov
+		est$df = fit$df
+		est$sparsity = fit$sparsity
+		est$loglik = fit$loglik
+		if(cov.output)
+			est$cov = fit$cov
+		est$cov.input = fit$cov.input
+		est$cov.output = fit$cov.output
+		est$scr = fit$scr
+		rm(fit)
+		gc()
+	}
+
+	if(method == "tiger")
+	{
+	  fit = huge.tiger(x, lambda = lambda, nlambda = nlambda, lambda.min.ratio = lambda.min.ratio, sym = sym, verbose = verbose)
+	  est$path = fit$path
+	  est$lambda = fit$lambda
+	  est$sparsity = fit$sparsity
+	  est$df = fit$df
+	  est$idx_mat = fit$idx_mat
+	  est$sym = sym
+	  est$scr = fit$scr
+	  est$cov.input = fit$cov.input
+	  est$icov = fit$icov;
+	  rm(fit,sym)
+	  gc()
+	}
+
+	est$data = x
+
+	rm(x,scr,lambda,lambda.min.ratio,nlambda,cov.output,verbose)
+	gc()
+	class(est) = "huge"
+	return(est)
+}
+
+my_huge <- function(X, gamma = 0.1, lamda = exp(seq(log(1e-3), log(1e-7), length = 50)),scale = FALSE){
+
+    out.glasso = huge(X, scale = scale, lambda = lamda, method = "glasso")
+    return(huge.select(out.glasso, criterion = "ebic",ebic.gamma = 0.1 ))
+
+
+}
+
+
+
+''')
+
+my_huge = robjects.globalenv["my_huge"]
+
+def get_index(tick):
+    """
+    Function that takes the sp500 index from yahoo
+    """
+    
+    import requests
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}
+    # ESG historical data (only changes yearly)
+    url_esg = f"https://query1.finance.yahoo.com/v7/finance/spark?symbols={tick}&range=10y&interval=1d&indicators=close&includeTimestamps=false&includePrePost=false&corsDomain=finance.yahoo.com&.tsrc=finance"
+    response = requests.get(url_esg, headers=headers)
+    if response.ok:
+        sp500 = pd.DataFrame({'date':pd.to_datetime(response.json()['spark']['result'][0]['response'][0]['timestamp'], unit= 's'),
+                              'price':response.json()['spark']['result'][0]['response'][0]['indicators']['quote'][0]['close']})
+    
+    else:
+        print("Empty data frame")
+        sp500 = pd.DataFrame()
+
+
+
+    return sp500
+
+sp500 = get_index('^GSPC')
+sp500['date'] = pd.to_datetime(sp500['date']).dt.date
+sp500['return'] = 1 + sp500['price'].pct_change()
+sp500['log_return'] = np.log(sp500['price']).diff()
+sp500 = sp500.iloc[:,:].dropna(axis= 0)
+
 learn_heavy_connected_graph = robjects.globalenv["learn_regular_heavytail_graph"]
 
 print(os.getcwd())
@@ -209,10 +390,68 @@ def var_div_ratio(w,data, q = 0.95):
 
   return port_var/np.inner(ind_var,w)
 
+def fix_weight(w:np.array):
+
+    if np.sum(w[w <0]) <-0.3:
+
+        # fix negative
+        w[w <0] = 0.3*w[w <0]/np.abs(np.sum(w[w <0]))
+        w[w >=0] = 1.3*w[w >=0]/np.abs(np.sum(w[w >=0]))
+
+    return w
+
+def omega(x, level = 0):
+  ecdf = ECDF(x)  
+  numerator = integrate.quad(lambda x: 1-ecdf(x), level, np.inf, limit = 10000)
+  denominator = integrate.quad(ecdf, -np.inf, level, limit = 10000)
+  if denominator[0] == 0.0:
+    return 10
+  else:
+    return numerator[0]/denominator[0]
+
+def sharpe(mu, sigma, r_f = 0):
+
+  return (mu-r_f)/sigma
+
+def sortino(mu,x, r_f = 0):
+
+  x_above = x.copy()
+  x_above[x_above > r_f] = r_f
+
+  return (mu -r_f)/(np.sqrt(np.mean(x_above ** 2)))
+
+def beta(X_port, X_index):
+  return np.cov(X_port,X_index)[0,1]/np.var(X_index)
+
+def treynor(mu, beta, r_f = 0):
+  return (mu-r_f)/beta
+
+def portfolio(S,precision_matrix, mu, stock_split_i, type):
+
+  if type == 'uniform':
+      w = np.ones(S.shape[1])/S.shape[1]
+      mu_p = np.mean(np.dot(stock_split_i, w))
+      var_p = np.dot(w,S).dot(w)
+  elif type == 'sharpe':
+      w = np.dot(precision_matrix, mu)/np.dot(np.ones(S.shape[0]), precision_matrix).dot(mu) 
+      w = fix_weight(w)
+      mu_p = np.mean(np.dot(stock_split_i, w))
+      var_p = np.dot(w,S).dot(w)
+  elif type == 'gmv':
+      w = np.dot(precision_matrix, np.ones(S.shape[0]))/np.dot(np.ones(S.shape[0]), precision_matrix).dot(np.ones(S.shape[0])) 
+      w = fix_weight(w)
+      mu_p = np.mean(np.dot(stock_split_i, w))
+      var_p = np.dot(w,S).dot(w)
+
+
+  return w, mu_p, var_p 
+
+
+
 
 # function to estimate covariance, and graphs
 
-def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150, nr_splits = 3, graph_estimation = "lgmrf_heavy", scale = 'normal'):
+def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150, nr_splits = 3, graph_estimation = "lgmrf_heavy", scale = False, transform = None, lamda = [1, 0.1]):
   """
   Parameters
   ------------------------------
@@ -231,33 +470,55 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
   # information stored in dictionaries
   stocks_considered= dict()
   graph_dict = {i: [] for i in range(nr_splits)}
-  max_sharpe_portfolio_dict = {i: [] for i in range(nr_splits)}
-  GMV_portfolio_dict = {i: [] for i in range(nr_splits)}
   return_dict  = {i: [] for i in range(nr_splits)}
+  esg_mean = {i: [] for i in range(nr_splits)}
+  esg_std = {i: [] for i in range(nr_splits)}
+  esg_max = {i: [] for i in range(nr_splits)}
+  esg_min = {i: [] for i in range(nr_splits)}
   cov_dict = {i: [] for i in range(nr_splits)}
-  gmv_div_dict = {i: [] for i in range(nr_splits)}
-  gmv_var_div_dict = {i: [] for i in range(nr_splits)}
-  sharpe_div_dict = {i: [] for i in range(nr_splits)}
-  sharpe_var_div_dict = {i: [] for i in range(nr_splits)}
-  uni_div_dict = {i: [] for i in range(nr_splits)}
-  uni_var_div_dict = {i: [] for i in range(nr_splits)}
+  prec_dict = {i: [] for i in range(nr_splits)}
+  prec_dict_plus_1 = {i: [] for i in range(nr_splits)}
+  prec_dict_minus_1 = {i: [] for i in range(nr_splits)}
+  opt_lambda = {i: [] for i in range(nr_splits)}
+  reg_lambda = {i: [] for i in range(nr_splits)}
 
-  max_sharpe_portfolio_dict2 = {i: [] for i in range(nr_splits)}
-  GMV_portfolio_dict2 = {i: [] for i in range(nr_splits)}
-  return_dict2  = {i: [] for i in range(nr_splits)}
-  cov_dict2 = {i: [] for i in range(nr_splits)}
-  gmv_div_dict2 = {i: [] for i in range(nr_splits)}
-  gmv_var_div_dict2 = {i: [] for i in range(nr_splits)}
-  sharpe_div_dict2 = {i: [] for i in range(nr_splits)}
-  sharpe_var_div_dict2 = {i: [] for i in range(nr_splits)}
-  uni_div_dict2 = {i: [] for i in range(nr_splits)}
-  uni_var_div_dict2 = {i: [] for i in range(nr_splits)}
+  portfolios_info = {}
+  portfolios_reg_info = {}
+
+  for port_type in ['uniform', 'sharpe', 'gmv']:
+    portfolios_info[port_type] = {}
+    portfolios_info[port_type]['weights'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['cov_div'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['var_div'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['omega'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['sharpe'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['sortino'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['beta'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['treynor'] = {i: [] for i in range(nr_splits)}
+
+  nlambda = len(lamda)
+  reg_interval = np.concatenate((np.arange(0, nlambda, 10), [nlambda-1]))
+  for port_type in ['uniform', 'sharpe', 'gmv']:
+    portfolios_reg_info[port_type] = {}
+    for j in reg_interval:
+      j = int(j)
+      portfolios_reg_info[port_type][j] = {}
+      portfolios_reg_info[port_type][j]['weights'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['cov_div'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['var_div'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['omega'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['sharpe'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['sortino'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['beta'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['treynor'] = {i: [] for i in range(nr_splits)}
+      
+
 
   stock_partition = {i: [] for i in range(nr_splits)}
   
   dates4 = []
 
-  for i in tqdm.tqdm(range(window_size, price_df.shape[0], 2)):
+  for i in tqdm.tqdm(range(window_size, price_df.shape[0], 2)): #price_df.shape[0]
       
 
     # At first iteration determine which stocks in the sector will be considered.
@@ -280,14 +541,14 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
 
     # get esg scores of the stocks for the current iteration
     esg_i = np.array(esg_df[stocks_considered[k]].iloc[i])
+
+    # get snp500 index for current iteration, used in  
+    snp500_i = np.array(sp500.loc[np.isin(sp500.date,price_pivot.iloc[(i-window_size):i].index), 'log_return'])
     # order stocks
     stocks_ordered_i = np.array(stocks_considered[k][np.argsort(esg_i)])
     # get date of the iteration i
     date_i = esg_df.index[i]
-    #NOT USED ------
-    #  Find which dates are  in the current rolling window 
-    #day_range_from_i = np.array([date_i - datetime.timedelta(days=i) for i in range(days_from_i)])
-    # NOT USED END
+
 
     # Store date
     dates4.append(date_i)
@@ -302,7 +563,32 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
       # third iteration stocks_index = [20,2,...,29]
 
       # select the stocks in this split and only select the time for this rolling window
-      stock_split_i = price_df[stocks_ordered_i[stocks_index]].iloc[(i-window_size):i]
+      
+      if transform is None:
+        stock_split_i = np.array(price_df[stocks_ordered_i[stocks_index]].iloc[(i-window_size):i])
+      elif transform == 'nonparanormal':
+        stock_split_i = price_df[stocks_ordered_i[stocks_index]].iloc[(i-window_size):i]
+        mu_tmp = np.array(stock_split_i.mean())
+        S_tmp = np.array(stock_split_i.cov())
+        stock_split_i = huge.huge_npn(np.array(stock_split_i) , npn_func="truncation")
+        # convert to correct scale again
+        stock_split_i = (stock_split_i*np.sqrt(np.diag(S_tmp)) + mu_tmp)
+      else:
+        raise ValueError(f"No transform called {transform}")
+      
+      # get standar deviation of each asset
+      var = np.diag(np.cov(stock_split_i.T))
+      if i == window_size:
+        print(var.shape)
+
+      esg_split_i_mean = esg_df[stocks_ordered_i[stocks_index]].iloc[i].mean()
+      esg_mean[i_split].append(esg_split_i_mean)
+      esg_split_i_std = esg_df[stocks_ordered_i[stocks_index]].iloc[i].std() 
+      esg_std[i_split].append(esg_split_i_std)
+      esg_split_i_max = esg_df[stocks_ordered_i[stocks_index]].iloc[i].max() 
+      esg_max[i_split].append(esg_split_i_max)
+      esg_split_i_min = esg_df[stocks_ordered_i[stocks_index]].iloc[i].min() 
+      esg_min[i_split].append(esg_split_i_min)
 
       stock_partition[i_split].append(stocks_ordered_i[stocks_index])
 
@@ -310,12 +596,7 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
         print(f"First iteration of {k}. Shape is {stock_split_i.shape}")
 
       X = np.array(stock_split_i)
-      var = np.diag(np.cov(X.T))
-      if scale == 'normal':
-        scaler = StandardScaler()
-        X = scaler.fit_transform(X)
       
-
       try:
         if graph_estimation == 'lgmrf_heavy':
           # Find nu for multivariate t-student
@@ -349,9 +630,15 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
           G = create_G(-precision_matrix_no_diag)
           graph_dict[i_split].append(G)
         elif graph_estimation == 'huge_glasso_ebic':
-          out = huge.huge(X, method = 'glasso', nlambda = 30,verbose = False)
-          out_select = huge.huge_select(out, criterion = "ebic" )
+          # out = huge.huge(X, method = 'glasso', nlambda = nlambda,verbose = False, lambda_min_ratio = 0.001)
+          # out_select = huge.huge_select(out, criterion = "ebic",ebic_gamma = 0.1 )
+          # out_select = dict(zip(out_select.names, list(out_select)))
+          out_select = my_huge(X, gamma = 0.01, lamda = lamda, scale = scale)
           out_select = dict(zip(out_select.names, list(out_select)))
+          where_optimal = int(np.where(out_select['opt.lambda'][0] == out_select['lambda'])[0][0])
+          print(where_optimal)
+          if (where_optimal == nlambda-1) or (where_optimal == 0):
+            warnings.warn("Warning optimal graph is last or first regularization parameter")
           precision_matrix = out_select['opt.icov'].copy()
           precision_matrix_no_diag = precision_matrix.copy()
           np.fill_diagonal(precision_matrix_no_diag,0)
@@ -385,48 +672,65 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
       if graph_estimation == 'lgmrf_heavy' or graph_estimation == 'lgmrf_normal':
         precision_matrix = precision_matrix + 0.001*np.identity(precision_matrix.shape[0])
       
+
+      opt_lambda[i_split].append(out_select['opt.lambda'][0])
+      reg_lambda[i_split].append(out_select['lambda'][reg_interval])
       # Calculate diversification using graph estimate
       S = np.linalg.inv(precision_matrix)
+      # If X was scaled during graph construction
+      # we need to get the covariance back (we do not want to use correlation for portfolio optimization)
+      if scale:
+        S = np.dot(np.diag(np.sqrt(var)), S).dot(np.diag(np.sqrt(var)))
       cov_dict[i_split].append(S)
-      mu = stock_split_i.mean()
+      mu = np.mean(stock_split_i, axis=0)
       return_dict[i_split].append(mu)
+      prec_dict[i_split].append(precision_matrix)
+      if (where_optimal+1)<=(nlambda-1):
+        prec_dict_plus_1[i_split].append(out_select['icov'][where_optimal+1])
+      else:
+        prec_dict_plus_1[i_split].append(np.nan)
+      if (where_optimal-1)>=0:
+        prec_dict_minus_1[i_split].append(out_select['icov'][where_optimal-1])
+      else:
+         prec_dict_minus_1[i_split].append(np.nan)
 
-      # GMV diversification
-      w_gmv = np.dot(precision_matrix, np.ones(S.shape[0]))/np.dot(np.ones(S.shape[0]), precision_matrix).dot(np.ones(S.shape[0])) 
-      GMV_portfolio_dict[i_split].append(w_gmv)
-      gmv_div_dict[i_split].append(div_ratio(w_gmv,S))
-      gmv_var_div_dict[i_split].append(var_div_ratio(w_gmv,X))
-      # SHARPE
-      w_sharpe = np.dot(precision_matrix, mu)/np.dot(np.ones(S.shape[0]), precision_matrix).dot(mu)
-      max_sharpe_portfolio_dict[i_split].append(w_sharpe)
-      sharpe_div_dict[i_split].append(div_ratio(w_sharpe,S))
-      sharpe_var_div_dict[i_split].append(var_div_ratio(w_sharpe,X))
-      # Uniform
-      w_uni = np.ones(S.shape[1])/S.shape[1]
-      uni_div_dict[i_split].append(div_ratio(w_uni,S))
-      uni_var_div_dict[i_split].append(var_div_ratio(w_uni,X))
+      for port_type in ['uniform', 'sharpe', 'gmv']:
+        w, mu_p, var_p = portfolio(S, np.linalg.inv(S), mu, np.array(stock_split_i), port_type)
+        r_p = np.dot(np.array(stock_split_i),w)
+        # print(np.sum(r_p <0))
+        portfolios_info[port_type]['weights'][i_split].append(w)
+        portfolios_info[port_type]['cov_div'][i_split].append(div_ratio(w,S))
+        portfolios_info[port_type]['var_div'][i_split].append(var_div_ratio(w,np.array(stock_split_i)))
+        portfolios_info[port_type]['sharpe'][i_split].append(sharpe(mu_p, np.sqrt(var_p)))
+        portfolios_info[port_type]['omega'][i_split].append(omega(r_p))
+        portfolios_info[port_type]['sortino'][i_split].append(sortino(mu_p, r_p))
 
-      # Calculate diversification by turning correlation back to covariance
-      S = np.dot(np.diag(var), np.linalg.inv(precision_matrix)).dot(np.diag(var))
-      precision_matrix = np.linalg.inv(precision_matrix)
-      cov_dict2[i_split].append(S)
-      mu = stock_split_i.mean()
-      return_dict2[i_split].append(mu)
+        beta_p = beta(r_p, snp500_i)
+        portfolios_info[port_type]['beta'][i_split].append(beta_p)
+        portfolios_info[port_type]['treynor'][i_split].append(treynor(mu_p, beta_p))
 
-      # GMV diversification
-      w_gmv = np.dot(precision_matrix, np.ones(S.shape[0]))/np.dot(np.ones(S.shape[0]), precision_matrix).dot(np.ones(S.shape[0])) 
-      GMV_portfolio_dict2[i_split].append(w_gmv)
-      gmv_div_dict2[i_split].append(div_ratio(w_gmv,S))
-      gmv_var_div_dict2[i_split].append(var_div_ratio(w_gmv,X))
-      # SHARPE
-      w_sharpe = np.dot(precision_matrix, mu)/np.dot(np.ones(S.shape[0]), precision_matrix).dot(mu)
-      max_sharpe_portfolio_dict2[i_split].append(w_sharpe)
-      sharpe_div_dict2[i_split].append(div_ratio(w_sharpe,S))
-      sharpe_var_div_dict2[i_split].append(var_div_ratio(w_sharpe,X))
-      # Uniform
-      w_uni = np.ones(S.shape[1])/S.shape[1]
-      uni_div_dict2[i_split].append(div_ratio(w_uni,S))
-      uni_var_div_dict2[i_split].append(var_div_ratio(w_uni,X))
+
+      
+      for j in reg_interval:
+        j = int(j)
+        for port_type in ['uniform', 'sharpe', 'gmv']:
+          S = np.linalg.inv(out_select['icov'][j])
+          if scale:
+            S = np.dot(np.diag(var), S).dot(np.diag(var))
+          w, mu_p, var_p = portfolio(S, np.linalg.inv(S), mu, np.array(stock_split_i), port_type)
+          r_p = np.dot(np.array(stock_split_i),w)
+          portfolios_reg_info[port_type][j]['weights'][i_split].append(w)
+          portfolios_reg_info[port_type][j]['cov_div'][i_split].append(div_ratio(w,S))
+          portfolios_reg_info[port_type][j]['var_div'][i_split].append(var_div_ratio(w,np.array(stock_split_i)))
+          portfolios_reg_info[port_type][j]['sharpe'][i_split].append(sharpe(mu_p, np.sqrt(var_p)))
+          portfolios_reg_info[port_type][j]['omega'][i_split].append(omega(r_p))
+          portfolios_reg_info[port_type][j]['sortino'][i_split].append(sortino(mu_p, r_p))
+          beta_p = beta(r_p, snp500_i)
+          portfolios_reg_info[port_type][j]['beta'][i_split].append(beta_p)
+          portfolios_reg_info[port_type][j]['treynor'][i_split].append(treynor(mu_p, beta_p))
+
+
+      
           
   dates = np.array(dates4)
 
@@ -435,39 +739,51 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
   assert len(graph_dict[1]) == len(graph_dict[2]), f"{k} 1 and 2 not same"
 
 
-  return {'dates':dates, 'graph_dict':graph_dict, 'sector':k, 'cov_dict':cov_dict, 
-  'GMV_portfolio_dict':GMV_portfolio_dict, 'max_sharpe_portfolio_dict':max_sharpe_portfolio_dict,
-  'return_dict':return_dict, 'window_size':window_size, 'stock_partition':stock_partition, 'gmv_div_dict':gmv_div_dict,
-  'gmv_var_div_dict':gmv_var_div_dict, 'sharpe_div_dict':sharpe_div_dict, 'sharpe_var_div_dict':sharpe_var_div_dict,
-  'uni_div_dict':uni_div_dict, 'uni_var_div_dict':uni_var_div_dict,'cov_dict2':cov_dict2, 
-  'GMV_portfolio_dict2':GMV_portfolio_dict2, 'max_sharpe_portfolio_dict2':max_sharpe_portfolio_dict2,
-  'return_dict2':return_dict2,  'gmv_div_dict2':gmv_div_dict2,
-  'gmv_var_div_dict2':gmv_var_div_dict2, 'sharpe_div_dict2':sharpe_div_dict2, 'sharpe_var_div_dict2':sharpe_var_div_dict2,
-  'uni_div_dict2':uni_div_dict2, 'uni_var_div_dict2':uni_var_div_dict2}
-
+  return {'dates':dates, 'graph_dict':graph_dict, 'sector':k, 'cov_dict':cov_dict, 'prec_dict':prec_dict, 'esg_mean':esg_mean, 'esg_std':esg_std,
+  'esg_max':esg_max, 'esg_min':esg_min,
+  'prec_dict_plus_1':prec_dict_plus_1, 'prec_dict_minus_1':prec_dict_minus_1, 'opt_lambda':opt_lambda, 'reg_lambda':reg_lambda,
+  'return_dict':return_dict, 'window_size':window_size, 'stock_partition':stock_partition, 'portfolios_info':portfolios_info,
+  'portfolios_reg_info':portfolios_reg_info}
 
 if __name__ == '__main__':
 
+  study = 'sector'
   d = 1
   winow_len = 300
   graph_estimation = 'huge_glasso_ebic'
-  scale = 'normal'
+
+  scale = False
+  transform = 'nonparanormal'
+  lamda = np.exp(np.linspace(start = np.log(1e-3), stop = np.log(1e-7), num = 100))
 
   print(graph_estimation)
   print(winow_len)
   print(scale)
+  print(sector_classification.keys())
+
+
+  # if not nested_i then the test will perform on each sector using sector_classfication dictionary already created
+  asset_dict = dict()
+  if study == 'sector':
+    asset_dict = sector_classification
+  elif study == 'nested_1':
+    asset_dict[study] = np.concatenate((sector_classification['Utilities'], sector_classification['Energy'], sector_classification['Basic Materials']))
+  elif study == 'TEST':
+    asset_dict = {'Industrials':sector_classification['Industrials']}
   
-  with Pool(1) as pool:
-    L = pool.starmap(graph_est, [(price_pivot.loc[:, np.isin(price_pivot.columns,sector_classification[k])], 
-                                  gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,sector_classification[k])], 
-                                  sector_classification[k], 
+  with Pool(4) as pool:
+    L = pool.starmap(graph_est, [(price_pivot.loc[:, np.isin(price_pivot.columns,asset_dict[k])], 
+                                  gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,asset_dict[k])], 
+                                  asset_dict[k], 
                                     k, 
                                     d,
                                     winow_len, 
                                     3,
-                                    graph_estimation) for k in ['Industrials']])#sector_classification.keys()
+                                    graph_estimation,
+                                    scale,
+                                    transform,
+                                    lamda) for k in asset_dict.keys()])#sector_classification.keys()
 
-  with open(f'data/Graphs/case_study_1_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}.pkl', 'wb') as f:
+  with open(f'data/Graphs/{study}_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl', 'wb') as f:
     pickle.dump(L, f)
-
 
