@@ -426,7 +426,13 @@ def beta(X_port, X_index):
 def treynor(mu, beta, r_f = 0):
   return (mu-r_f)/beta
 
+def max_drawdown(X_port):
+  x = np.cumprod(X_port)
+  return np.min((x/np.array(pd.DataFrame(x).cummax().iloc[:,0])-1))
+
+
 def portfolio(S,precision_matrix, mu, stock_split_i, type):
+
 
   if type == 'uniform':
       w = np.ones(S.shape[1])/S.shape[1]
@@ -445,8 +451,6 @@ def portfolio(S,precision_matrix, mu, stock_split_i, type):
 
 
   return w, mu_p, var_p 
-
-
 
 
 # function to estimate covariance, and graphs
@@ -495,6 +499,7 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
     portfolios_info[port_type]['sortino'] = {i: [] for i in range(nr_splits)}
     portfolios_info[port_type]['beta'] = {i: [] for i in range(nr_splits)}
     portfolios_info[port_type]['treynor'] = {i: [] for i in range(nr_splits)}
+    portfolios_info[port_type]['max_draw'] = {i: [] for i in range(nr_splits)}
 
   nlambda = len(lamda)
   reg_interval = np.concatenate((np.arange(0, nlambda, 10), [nlambda-1]))
@@ -511,13 +516,15 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
       portfolios_reg_info[port_type][j]['sortino'] = {i: [] for i in range(nr_splits)}
       portfolios_reg_info[port_type][j]['beta'] = {i: [] for i in range(nr_splits)}
       portfolios_reg_info[port_type][j]['treynor'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['max_draw'] = {i: [] for i in range(nr_splits)}
       
 
 
   stock_partition = {i: [] for i in range(nr_splits)}
   
   dates4 = []
-
+  min_max_date = np.min([np.max(price_df.index), np.max(esg_df.index)])
+  price_df=price_df.loc[price_df.index <= min_max_date]
   for i in tqdm.tqdm(range(window_size, price_df.shape[0], 2)): #price_df.shape[0]
       
 
@@ -538,16 +545,15 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
         print(f'{k} dropped {stocks_considered[k][:res]}')
         stocks_considered[k] = stocks_considered[k][res:]
 
-
     # get esg scores of the stocks for the current iteration
-    esg_i = np.array(esg_df[stocks_considered[k]].iloc[i])
+    esg_i = np.array(esg_df[stocks_considered[k]].loc[esg_df.index == price_df.index[i]].iloc[0,:])
 
     # get snp500 index for current iteration, used in  
     snp500_i = np.array(sp500.loc[np.isin(sp500.date,price_pivot.iloc[(i-window_size):i].index), 'log_return'])
     # order stocks
     stocks_ordered_i = np.array(stocks_considered[k][np.argsort(esg_i)])
     # get date of the iteration i
-    date_i = esg_df.index[i]
+    date_i = price_df.index[i]
 
 
     # Store date
@@ -711,23 +717,23 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
 
 
       
-      for j in reg_interval:
-        j = int(j)
-        for port_type in ['uniform', 'sharpe', 'gmv']:
-          S = np.linalg.inv(out_select['icov'][j])
-          if scale:
-            S = np.dot(np.diag(var), S).dot(np.diag(var))
-          w, mu_p, var_p = portfolio(S, np.linalg.inv(S), mu, np.array(stock_split_i), port_type)
-          r_p = np.dot(np.array(stock_split_i),w)
-          portfolios_reg_info[port_type][j]['weights'][i_split].append(w)
-          portfolios_reg_info[port_type][j]['cov_div'][i_split].append(div_ratio(w,S))
-          portfolios_reg_info[port_type][j]['var_div'][i_split].append(var_div_ratio(w,np.array(stock_split_i)))
-          portfolios_reg_info[port_type][j]['sharpe'][i_split].append(sharpe(mu_p, np.sqrt(var_p)))
-          portfolios_reg_info[port_type][j]['omega'][i_split].append(omega(r_p))
-          portfolios_reg_info[port_type][j]['sortino'][i_split].append(sortino(mu_p, r_p))
-          beta_p = beta(r_p, snp500_i)
-          portfolios_reg_info[port_type][j]['beta'][i_split].append(beta_p)
-          portfolios_reg_info[port_type][j]['treynor'][i_split].append(treynor(mu_p, beta_p))
+      # for j in reg_interval:
+      #   j = int(j)
+      #   for port_type in ['uniform', 'sharpe', 'gmv']:
+      #     S = np.linalg.inv(out_select['icov'][j])
+      #     if scale:
+      #       S = np.dot(np.diag(var), S).dot(np.diag(var))
+      #     w, mu_p, var_p = portfolio(S, np.linalg.inv(S), mu, np.array(stock_split_i), port_type)
+      #     r_p = np.dot(np.array(stock_split_i),w)
+      #     portfolios_reg_info[port_type][j]['weights'][i_split].append(w)
+      #     portfolios_reg_info[port_type][j]['cov_div'][i_split].append(div_ratio(w,S))
+      #     portfolios_reg_info[port_type][j]['var_div'][i_split].append(var_div_ratio(w,np.array(stock_split_i)))
+      #     portfolios_reg_info[port_type][j]['sharpe'][i_split].append(sharpe(mu_p, np.sqrt(var_p)))
+      #     portfolios_reg_info[port_type][j]['omega'][i_split].append(omega(r_p))
+      #     portfolios_reg_info[port_type][j]['sortino'][i_split].append(sortino(mu_p, r_p))
+      #     beta_p = beta(r_p, snp500_i)
+      #     portfolios_reg_info[port_type][j]['beta'][i_split].append(beta_p)
+      #     portfolios_reg_info[port_type][j]['treynor'][i_split].append(treynor(mu_p, beta_p))
 
 
       
@@ -747,14 +753,14 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
 
 if __name__ == '__main__':
 
-  study = 'sector'
+  study = 'TEST'
   d = 1
   winow_len = 300
   graph_estimation = 'huge_glasso_ebic'
 
-  scale = False
-  transform = 'nonparanormal'
-  lamda = np.exp(np.linspace(start = np.log(1e-3), stop = np.log(1e-7), num = 100))
+  scale = True
+  transform = None#'nonparanormal'
+  lamda = np.exp(np.linspace(start = np.log(1e-1), stop = np.log(1e-3), num = 50))
 
   print(graph_estimation)
   print(winow_len)
@@ -771,7 +777,7 @@ if __name__ == '__main__':
   elif study == 'TEST':
     asset_dict = {'Industrials':sector_classification['Industrials']}
   
-  with Pool(4) as pool:
+  with Pool(1) as pool:
     L = pool.starmap(graph_est, [(price_pivot.loc[:, np.isin(price_pivot.columns,asset_dict[k])], 
                                   gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,asset_dict[k])], 
                                   asset_dict[k], 
@@ -784,6 +790,51 @@ if __name__ == '__main__':
                                     transform,
                                     lamda) for k in asset_dict.keys()])#sector_classification.keys()
 
-  with open(f'data/Graphs/{study}_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl', 'wb') as f:
+  with open(f'data/Graphs/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl', 'wb') as f:
     pickle.dump(L, f)
+
+
+
+
+  # scale = False
+  # transform = None
+  # lamda = np.exp(np.linspace(start = np.log(1e-3), stop = np.log(1e-7), num = 100))
+
+  # with Pool(4) as pool:
+  #   L = pool.starmap(graph_est, [(price_pivot.loc[:, np.isin(price_pivot.columns,asset_dict[k])], 
+  #                                 gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,asset_dict[k])], 
+  #                                 asset_dict[k], 
+  #                                   k, 
+  #                                   d,
+  #                                   winow_len, 
+  #                                   3,
+  #                                   graph_estimation,
+  #                                   scale,
+  #                                   transform,
+  #                                   lamda) for k in asset_dict.keys()])#sector_classification.keys()
+
+  # with open(f'data/Graphs/{study}_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl', 'wb') as f:
+  #   pickle.dump(L, f)
+
+
+
+  # scale = True
+  # transform = None
+  # lamda = np.exp(np.linspace(start = np.log(1e-1), stop = np.log(1e-4), num = 100))
+
+  # with Pool(4) as pool:
+  #   L = pool.starmap(graph_est, [(price_pivot.loc[:, np.isin(price_pivot.columns,asset_dict[k])], 
+  #                                 gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,asset_dict[k])], 
+  #                                 asset_dict[k], 
+  #                                   k, 
+  #                                   d,
+  #                                   winow_len, 
+  #                                   3,
+  #                                   graph_estimation,
+  #                                   scale,
+  #                                   transform,
+  #                                   lamda) for k in asset_dict.keys()])#sector_classification.keys()
+
+  # with open(f'data/Graphs/{study}_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl', 'wb') as f:
+  #   pickle.dump(L, f)
 

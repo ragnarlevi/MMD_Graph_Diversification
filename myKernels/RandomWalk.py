@@ -766,11 +766,11 @@ class RandomWalk():
         D = np.ones(shape=(len(w)))*mu_vec[0]
 
         for i in range(1,k+1):
-            D = D + np.power(w,i)
+            D = D + np.power(w,i)*mu_vec[i]
 
         stop_part = np.kron(np.matmul(q1.T, u1), np.matmul(q2.T, u2))
         start_part = np.kron(np.matmul(u1.T, p1), np.matmul(u2.T, p2))
-        return mu_vec[1]*np.matmul(np.matmul(stop_part, np.diag(D)), start_part)
+        return np.matmul(np.matmul(stop_part, np.diag(D)), start_part)
 
 
 
