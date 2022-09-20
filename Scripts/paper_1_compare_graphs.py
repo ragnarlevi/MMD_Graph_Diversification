@@ -33,21 +33,33 @@ import GraphStatKernel
 import WWL
 
 
-def graph_test(n, graph_dict, weights, k, dates, B, edge_attr = 'weight',day_step = 1, graph_label = None, weight_fun = None, c = 0.001):
+def graph_test(study, transform, scale, n,graph_name, ptype, B, edge_attr = 'weight',day_step = 1, graph_label = None, weight_fun = None, c = 0.001):
     """
     n - number of samples
-    graph_dict - graph_dict contained in the list from output from Generate_graphs_case_1
-    k - sector name contained in the list from output from Generate_graphs_case_1
-    dates - dates  contained in the list from output from Generate_graphs_case_1
+    data_dict - data dictionary output from Generate_graphs_case_1
+    graph_name - which graphs graph_dict or graph_dict2 (with self loops)
+    ptype - portfolio tyoe, uniform, sharpe or gmv
     B - nr bootstraps
     edge_attr - If weight, then the rw kernel uses weights
     day_step - "Thinning" of the sample
     graph_label - if none, no labels, if signed then edge labels
     weight_fun - if abs then then all weights will be set as the absolute value
     """
-    print(k)
+
+    file = f'data/Graphs/{study}_d_1_winlen_300_gest_huge_glasso_ebic_scale_{scale}_trans_{transform}.pkl'
+    with open(file, 'rb') as f:
+        data_dict = pickle.load(f)
+
     nr_splits = 3
     m = n
+
+    graph_dict = data_dict[graph_name]
+    weights = data_dict['portfolios_info'][ptype]['weights']
+    k = data_dict['sector']
+    dates = data_dict['dates']
+    print(k)
+
+
 
 
     esg_return_df = pd.DataFrame()
@@ -66,9 +78,12 @@ def graph_test(n, graph_dict, weights, k, dates, B, edge_attr = 'weight',day_ste
                     Gs = [nx.from_numpy_array(np.abs(nx.adjacency_matrix(Gs[k]).todense())) for k in range(len(Gs))]
 
                 # rw nr eigenvalues
-                r = np.min((12, Gs[0].number_of_nodes()-1))
+                r = np.min((6, Gs[0].number_of_nodes()-1))
 
-                p = np.vstack(([ weights[group_1][s] for s in range(cnt*day_step, i )],[ weights[group_2][s] for s in range(cnt*day_step, i )]))
+                if ptype is None:
+                    p= None
+                else:
+                    p = np.vstack(([ weights[group_1][s] for s in range(cnt*day_step, i )],[ weights[group_2][s] for s in range(cnt*day_step, i )]))
 
                 
                 if graph_label is None:
@@ -76,8 +91,8 @@ def graph_test(n, graph_dict, weights, k, dates, B, edge_attr = 'weight',day_ste
                     K = rw_kernel.fit_ARKU_plus(r = r, normalize_adj=False, verbose=False, edge_attr = edge_attr)
 
                     v,_ = np.linalg.eigh(K)
-                    v[np.abs(v) < 10e-5] = 0
-                    if np.any(v < -10e-5):
+                    # v[np.abs(v) < 10e-5] = 0
+                    if np.any(v < -10e-8):
                         raise ValueError("Not psd")
                 elif graph_label == 'signed':
 
@@ -86,8 +101,8 @@ def graph_test(n, graph_dict, weights, k, dates, B, edge_attr = 'weight',day_ste
                     K = rw_kernel.fit_ARKU_edge(r = r, edge_labels = [1,-1], verbose=False, edge_attr = edge_attr, edge_label_tag='sign')
 
                     v,_ = np.linalg.eigh(K)
-                    v[np.abs(v) < 10e-5] = 0
-                    if np.any(v < -10e-5):
+                    #v[np.abs(v) < 10e-5] = 0
+                    if np.any(v < -10e-8):
                         raise ValueError("Not psd")
 
                 else:
@@ -95,12 +110,12 @@ def graph_test(n, graph_dict, weights, k, dates, B, edge_attr = 'weight',day_ste
 
 
 
-                MMD_functions = [mg.MMD_b, mg.MMD_u, mg.MMD_l]# mg.MONK_EST]
+                MMD_functions = [mg.MMD_b, mg.MMD_u, mg.MMD_l, mg.MONK_EST]
                 kernel_hypothesis = mg.BoostrapMethods(MMD_functions)
                 function_arguments = [dict(n = n, m = m ), 
                                     dict(n = n, m = m ),
-                                    dict(n = n, m = m )]#, 
-                                    #dict(Q = 5, y1 = list(range(n)), y2 = list(range(n,n+n)) )]
+                                    dict(n = n, m = m ), 
+                                    dict(Q = 5, y1 = list(range(n)), y2 = list(range(n,n+n)) )]
                 kernel_hypothesis.Bootstrap(K, function_arguments, B = B)
 
                 info_dict = dict()
@@ -110,7 +125,7 @@ def graph_test(n, graph_dict, weights, k, dates, B, edge_attr = 'weight',day_ste
                 info_dict['MMD_u'] = kernel_hypothesis.p_values['MMD_u']
                 info_dict['MMD_b'] = kernel_hypothesis.p_values['MMD_b']
                 info_dict['MMD_l'] = kernel_hypothesis.p_values['MMD_l']
-                #info_dict['MONK_EST'] = kernel_hypothesis.p_values['MONK_EST']
+                info_dict['MONK_EST'] = kernel_hypothesis.p_values['MONK_EST']
                 info_dict['kernel'] = "rw"
                 info_dict['r'] = r
                 info_dict['c'] = c
@@ -123,7 +138,14 @@ def graph_test(n, graph_dict, weights, k, dates, B, edge_attr = 'weight',day_ste
                 pbar.update()
     pbar.close()
 
-    return {'info_dict':esg_return_df, 'sector':k, 'n':n, 'dates':dates[n:]}
+    L= {'info_dict':esg_return_df, 'sector':k, 'n':n, 'dates':dates[n:], 'graph_dict':graph_name, 'scale':data_dict['scale'],
+    'transform':data_dict['transform'], 'transform':transform, 'scale':scale}
+
+    with open(f'data/mmd_test/{study}_d_{1}_winlen_{300}_gest_{"huge_glasso_ebic"}_scale_{scale}_trans_{transform}_gname_{graph_name}_n_{n}_B_{B}_rw_{edge_attr}_dstep_{day_step}_glabel_{graph_label}_wfun_{weight_fun}_p_{ptype}.pkl', 'wb') as f:
+        pickle.dump(L, f)
+
+    return None
+
 
 
 
@@ -135,36 +157,28 @@ if __name__ == '__main__':
     edge_attr = 'weight'
 
     n = 20
-    day_step = 10
+    day_step = 5
     graph_label = None#'signed'
     weight_fun = None
     B = 5000
-    study = 'TEST'
 
 
 
-    transform = None#'nonparanormal'
-    scale = True
-    ptype = 'gmv'
-    file = f'data/Graphs/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}.pkl'
-    with open(file, 'rb') as f:
-        data_dict = pickle.load(f)
 
 
-    with Pool(1) as pool:
-        L = pool.starmap(graph_test, [(n, 
-                                        data_dict[i]['graph_dict'], 
-                                        data_dict[i]['portfolios_info'][ptype]['weights'],
-                                        data_dict[i]['sector'], 
-                                        data_dict[i]['dates'],
+    with Pool(3) as pool:
+        L = pool.starmap(graph_test, [( study, transform, scale,
+                                        n, 
+                                        'graph_dict',
+                                        ptype,
                                         B,
                                         edge_attr,
                                         day_step,
                                         graph_label,
                                         weight_fun,
-                                        1e-2) for i in [0] ])#range(len(data_dict))])
+                                        1e-10) for study, transform, scale, ptype in [
+                                                                                      ('Communication Services', 'nonparanormal', False, 'uniform'),
+                                                                                      ('Communication Services', 'nonparanormal', False, 'sharpe'),
+                                                                                      ('Communication Services', 'nonparanormal', False, 'gmv')] ])
 
     
-    with open(f'data/mmd_test/{study}_d_{d}_winlen_{winow_len}_gest_{graph_estimation}_scale_{scale}_trans_{transform}_n_{n}_B_{B}_rw_{edge_attr}_dstep_{day_step}_glabel_{graph_label}_wfun_{weight_fun}_p_{ptype}.pkl', 'wb') as f:
-        pickle.dump(L, f)
-
