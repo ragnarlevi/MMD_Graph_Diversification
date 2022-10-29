@@ -4,6 +4,7 @@ fast Random walk kernels algorithm from http://www.cs.cmu.edu/~ukang/papers/fast
 """
 
 
+from modulefinder import packagePathMap
 from networkx.classes.function import get_node_attributes
 import numpy as np
 from numpy.linalg import eigh, inv
@@ -611,7 +612,7 @@ class RandomWalk():
 
 
 
-    def fit_random_walk(self, mu_vec, k, r = None, normalize_adj = False, row_normalize_adj = False, verbose = True):
+    def fit_random_walk(self, mu_vec, k, r , normalize_adj = False, row_normalize_adj = False, verbose = True, edge_attr = 'weight'):
         """
         Perform p-random walks. Symmetric matrix
 
@@ -634,9 +635,9 @@ class RandomWalk():
             raise ValueError("Can not have both row normalized and normalized adj") 
 
         
-        all_A = [None] * self.N
-        U_list = [None] * self.N  # eigenvector matrix of each adj matrix
-        Lamda_list = [None] * self.N  # eigenvalues of each adj matrix
+        # all_A = [None] * self.N
+        # U_list = [None] * self.N  # eigenvector matrix of each adj matrix
+        # Lamda_list = [None] * self.N  # eigenvalues of each adj matrix
         K = np.zeros((self.N, self.N))
 
         if verbose:
@@ -646,45 +647,21 @@ class RandomWalk():
         for i in range(self.N):
             for j in range(i,self.N):
 
-                if normalize_adj:
-                    if all_A[i] is None:
-                        all_A[i] = self._normalized_adj(self.X[i])
-                        if r is None:
-                            Lamda_list[i], U_list[i] = eigh(np.array(all_A[i].T.todense()))
-                        else:
-                            Lamda_list[i], U_list[i] = eigsh(all_A[i].T, k = r)
-                    if all_A[j] is None:
-                        all_A[j] = self._normalized_adj(self.X[j])
-                        if r is None:
-                            Lamda_list[j], U_list[j] = eigh(np.array(all_A[j].T.todense()))
-                        else:
-                            Lamda_list[j], U_list[j] = eigsh(all_A[j].T, k = r)
-                elif row_normalize_adj:
-                    if all_A[i] is None:
-                        all_A[i] = self._row_normalized_adj(self.X[i])
-                        if r is None:
-                            Lamda_list[i], U_list[i] = eigh(np.array(all_A[i].T.todense()))
-                        else:
-                            Lamda_list[i], U_list[i] = eigsh(all_A[i].T, k = r)
-                    if all_A[j] is None:
-                        all_A[j] = self._row_normalized_adj(self.X[j])
-                        if r is None:
-                            Lamda_list[j], U_list[j] = eigh(np.array(all_A[j].T.todense()))
-                        else:
-                            Lamda_list[j], U_list[j] = eigsh(all_A[j].T, k = r)
-                else:
-                    if all_A[i] is None:
-                        all_A[i] = self._get_adj_matrix(self.X[i])
-                        if r is None:
-                            Lamda_list[i], U_list[i] = eigh(np.array(all_A[i].T.todense()))
-                        else:
-                            Lamda_list[i], U_list[i] = eigsh(all_A[i].T, k = r)
-                    if all_A[j] is None:
-                        all_A[j] = self._get_adj_matrix(self.X[j])
-                        if r is None:
-                            Lamda_list[j], U_list[j] = eigh(np.array(all_A[j].T.todense()))
-                        else:
-                            Lamda_list[j], U_list[j] = eigsh(all_A[j].T, k = r)
+        #         if normalize_adj:
+        #             if all_A[i] is None:
+        #                 all_A[i] = self._normalized_adj(self.X[i])
+        #             if all_A[j] is None:
+        #                 all_A[j] = self._normalized_adj(self.X[j])
+        #         elif row_normalize_adj:
+        #             if all_A[i] is None:
+        #                 all_A[i] = self._row_normalized_adj(self.X[i])
+        #             if all_A[j] is None:
+        #                 all_A[j] = self._row_normalized_adj(self.X[j])
+        #         else:
+        #             if all_A[i] is None:
+        #                 all_A[i] = self._get_adj_matrix(self.X[i])
+        #             if all_A[j] is None:
+        #                 all_A[j] = self._get_adj_matrix(self.X[j])
 
 
                 
@@ -710,14 +687,13 @@ class RandomWalk():
                     q1 = self.q[i]
                     q2 = self.q[j]
 
-                if r is None:
-                    p1 = np.expand_dims(p1, axis = 1)
-                    p2 = np.expand_dims(p2, axis = 1)
-                    q1 = np.expand_dims(q1, axis = 1)
-                    q2 = np.expand_dims(q2, axis = 1)
-
-
-                K[i,j] = self.p_rw_symmetric(U_list[i], Lamda_list[i], U_list[j], Lamda_list[j], k, mu_vec, p1, p2, q1, q2, r)
+        #         if r is None:
+        #             p1 = np.expand_dims(p1, axis = 1)
+        #             p2 = np.expand_dims(p2, axis = 1)
+        #             q1 = np.expand_dims(q1, axis = 1)
+        #             q2 = np.expand_dims(q2, axis = 1)
+# nx.adjacency_matrix(self.X[j], weight = 'weight')
+                K[i,j] = self.p_rw_symmetric(self._get_adj_matrix(self.X[i], edge_attr = edge_attr) ,self._get_adj_matrix(self.X[j], edge_attr = edge_attr), k, mu_vec, p1, p2, q1, q2, r)
 
                 if verbose:
                     pbar.update()
@@ -733,7 +709,7 @@ class RandomWalk():
         return K
 
 
-    def p_rw_symmetric(self, u1, w1, u2, w2, k, mu_vec, p1, p2, q1, q2, r = None):
+    def p_rw_symmetric(self,A1, A2, k, mu_vec, p1, p2, q1, q2, r = None):
         """
         Perform p-random walks. Symmetric matrix
 
@@ -752,25 +728,35 @@ class RandomWalk():
         float kernel value between W1,W2
 
         """
-
         if (r is not None):
             if r < 1:
                 raise ValueError('r has to 1 or bigger')
 
-        if k < 1:
-            raise ValueError('k has to 1 or bigger')
+
+        A = np.array(sparse_kron(A1,A2).todense())
+        #w, u = eigsh(A.T, k= r)
+
+        #D = np.ones(shape=(len(w)))*mu_vec[0]
+        D = np.identity(A.shape[0])*mu_vec[0]
+        A_mult = np.identity(A.shape[0])
+        for s in range(1,k+1):
+            A_mult = np.dot(A_mult, A)
+            D = D + A_mult*mu_vec[s]
+
+        pk = np.kron(p1,p2)
+        qk = np.kron(q1,q2)
+        return np.dot(qk, D).dot(pk)
 
 
-        w = np.array(np.concatenate([w*w2 for w in w1]))
+        # for i in range(1,k+1):
+        #     D = D + np.power(w,i)*mu_vec[i]
 
-        D = np.ones(shape=(len(w)))*mu_vec[0]
-
-        for i in range(1,k+1):
-            D = D + np.power(w,i)*mu_vec[i]
-
-        stop_part = np.kron(np.matmul(q1.T, u1), np.matmul(q2.T, u2))
-        start_part = np.kron(np.matmul(u1.T, p1), np.matmul(u2.T, p2))
-        return np.matmul(np.matmul(stop_part, np.diag(D)), start_part)
+        # p = np.kron(p1,p2)
+        # q = np.kron(q1,q2)
+        # stop_part = np.matmul(u.T, q)
+        # start_part = np.matmul(u.T, p)
+        # return np.matmul(np.matmul(stop_part.T, np.diag(D)), start_part)
+        
 
 
 
@@ -815,6 +801,12 @@ class RandomWalk():
 
         if r < 1:
             raise ValueError('r has to 1 or bigger')
+
+        u1 = u1[:,np.where(w1!= 0)[0]]
+        w1 = w1[np.where(w1!= 0)[0]]
+
+        u2 = u2[:,np.where(w2!= 0)[0]]
+        w2 = w2[np.where(w2!= 0)[0]]
  
         diag_inverse =  np.kron(np.diag(np.reciprocal(w1)), np.diag(np.reciprocal(w2)))
         Lamda = inv(diag_inverse - self.c * np.identity(diag_inverse.shape[0]))

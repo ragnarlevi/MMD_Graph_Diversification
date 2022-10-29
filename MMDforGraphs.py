@@ -19,53 +19,131 @@ import MONK
 import tqdm
 
 # Biased empirical maximum mean discrepancy
-def MMD_b(K: np.array, n: int, m: int):
+def MMD_b(K: np.array, n1: int, n2: int):
+    '''
+    Biased empirical maximum mean discrepancy
 
-    if (n + m) != K.shape[0]:
+    Parameters
+    ---------------------
+    K: np.array,
+        Kernel matrix size K (n+m) x (n+m)
+    n1: int,
+        Number of observations in sample 1
+
+    n2: int,
+        Number of observations in sample 1
+
+    Returns
+    ----------------------------
+    float
+        Unbiased estimate of the maximum mean discrepancy
+    
+    '''
+
+    if (n1 + n2) != K.shape[0]:
         raise ValueError("n + m have to equal the size of K")
 
-    Kx = K[:n, :n]
-    Ky = K[n:, n:]
-    Kxy = K[:n, n:]
+    Kx = K[:n1, :n1]
+    Ky = K[n1:, n1:]
+    Kxy = K[:n1, n1:]
     
     # important to write 1.0 and not 1 to make sure the outcome is a float!
-    return 1.0 / (n ** 2) * Kx.sum() + 1.0 / (n * m) * Ky.sum() - 2.0 / (m ** 2) * Kxy.sum()
+    return 1.0 / (n1 ** 2) * Kx.sum() + 1.0 / (n1 * n2) * Ky.sum() - 2.0 / (n2 ** 2) * Kxy.sum()
 
 # Unbiased empirical maximum mean discrepancy
-def MMD_u(K: np.array, n: int, m: int):
-    if (n + m) != K.shape[0]:
-        raise ValueError("n + m have to equal the size of K")
-    Kx = K[:n, :n]
-    Ky = K[n:, n:]
-    Kxy = K[:n, n:]
-    # important to write 1.0 and not 1 to make sure the outcome is a float!
-    return 1.0 / (n* (n - 1.0)) * (Kx.sum() - np.diag(Kx).sum()) + 1.0 / (m * (m - 1.0)) * (Ky.sum() - np.diag(Ky).sum()) - 2.0 / (n * m) * Kxy.sum()
+def MMD_u(K: np.array, n1: int, n2: int):
+    '''
+    Unbiased empirical maximum mean discrepancy
 
-def MONK_EST(K, Q, y1, y2):
-    """
-    Wrapper for MONK
-    """
+    Parameters
+    ---------------------
+    K: np.array,
+        Kernel matrix size K (n+m) x (n+m)
 
-    mmd =  MONK.MMD_MOM(Q = Q, kernel_type = 'matrix', kernel=K)
-    return mmd.estimate(y1, y2)
+    n1: int,
+        Number of observations in sample 1
 
-def MMD_l(K: np.array, n: int, m: int) -> float:
+    n2: int,
+        Number of observations in sample 1
 
-    assert n == m, "n has to be equal to m"
-
-    Kxx = K[:n,:n]
-    Kyy = K[n:,n:]
-    Kxy = K[:n,n:]
-    Kyx = K[n:,:n]
-
-    if n %2 != 0:
-        n = n-1
-
+    Returns
+    ----------------------------
+    float
+        Unbiased estimate of the maximum mean discrepancy
     
-    return np.mean(Kxx[range(0,n-1,2), range(1,n,2)]) +\
-            np.mean(Kyy[range(0,n-1,2), range(1,n,2)]) -\
-            np.mean(Kxy[range(0,n-1,2), range(1,n,2)]) -\
-            np.mean(Kyx[range(0,n-1,2), range(1,n,2)])
+    '''
+
+    if (n1 + n2) != K.shape[0]:
+        raise ValueError("n + m have to equal the size of K")
+    Kx = K[:n1, :n1]
+    Ky = K[n1:, n1:]
+    Kxy = K[:n1, n1:]
+    # important to write 1.0 and not 1 to make sure the outcome is a float!
+    return 1.0 / (n1* (n1 - 1.0)) * (Kx.sum() - np.diag(Kx).sum()) + 1.0 / (n2 * (n2 - 1.0)) * (Ky.sum() - np.diag(Ky).sum()) - 2.0 / (n1 * n2) * Kxy.sum()
+
+def MONK_EST(K, Q, n1, n2):
+    """
+    Wrapper for MONK class
+
+    Parameters
+    ---------------------
+    K: np.array,
+        Kernel matrix size K (n+m) x (n+m)
+
+    Q: int,
+        Number of partitions for each sample.
+
+    n1: int,
+        Number of observations in sample 1
+
+    n2: int,
+        Number of observations in sample 1
+
+    Returns
+    ----------------------------
+    float
+        Unbiased estimate of the maximum mean discrepancy
+
+
+    """
+
+    mmd =  MONK.MY_MMD_MOM(Q = Q,  K=K)
+    return mmd.estimate(n1, n2)
+
+def MMD_l(K: np.array, n1: int, n2: int) -> float:
+    '''
+    Unbiased estimate of the maximum mean discrepancy using fewer Kernel evaluations
+
+    Parameters
+    ---------------------
+    K: np.array,
+        Kernel matrix size K (n+m) x (n+m)
+    n1: int,
+        Number of observations in sample 1
+
+    n2: int,
+        Number of observations in sample 1
+
+    Returns
+    ----------------------------
+    float
+        Unbiased estimate of the maximum mean discrepancy using fewer Kernel evaluations
+    
+    '''
+
+    assert n1 == n2, "n has to be equal to m"
+
+    Kxx = K[:n1,:n1]
+    Kyy = K[n1:,n1:]
+    Kxy = K[:n1,n1:]
+    Kyx = K[n1:,:n1]
+
+    if n1 %2 != 0:
+        n1 = n1-1
+    return np.mean(Kxx[range(0,n1-1,2), range(1,n1,2)]) +\
+            np.mean(Kyy[range(0,n1-1,2), range(1,n1,2)]) -\
+            np.mean(Kxy[range(0,n1-1,2), range(1,n1,2)]) -\
+            np.mean(Kyx[range(0,n1-1,2), range(1,n1,2)])
 
 
 def factorial_k(m, k):
@@ -336,14 +414,12 @@ class BoostrapMethods():
         # keep p-value result from each MMD function
         p_value_dict = dict()
         
-
         # get arguments of each function ready for evaluation
         inputs = [None] * len(self.list_of_functions)
         for i in range(len(self.list_of_functions)):
             if self.function_arguments[i] is None:
                 continue
             inputs[i] =  ", ".join("=".join((k,str(v))) for k,v in sorted(self.function_arguments[i].items()))
-
 
         # Calculate sample mmd statistic, and create a dictionary for bootstrapped statistics
         sample_statistic = dict()
