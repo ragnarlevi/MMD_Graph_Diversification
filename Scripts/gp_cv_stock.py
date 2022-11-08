@@ -86,6 +86,26 @@ if __name__ == '__main__':
     
     with open(f'data/tidy/gp_esg_stock.pkl', 'wb') as f:
             pickle.dump(L, f)
-            
+    
+
+    # Save as mean predictions as data frame
+    esg_gp_models_ind_stocks = pd.read_pickle('data/tidy/gp_esg_stock.pkl')
+    # convert list of dicts to one dict
+    esg_gp_models_ind_stocks = {list(esg_gp_models_ind_stocks[i].keys())[0]:esg_gp_models_ind_stocks[i][list(esg_gp_models_ind_stocks[i].keys())[0]] for i in range(len(esg_gp_models_ind_stocks))}
+
+
+    esg_stock_refined= pd.read_pickle('../data/tidy/esg_refined_no_diff.pkl')
+    gp_esg_stock_data_frame = {}
+
+    gp_esg_stock_data_frame = {}
+
+    for stock, gp_items in esg_gp_models_ind_stocks.items():
+
+        gp_esg_stock_data_frame[stock] = gp_items['mean_prediction']
+
+        gp_esg_stock_data_frame = pd.DataFrame(gp_esg_stock_data_frame, index = esg_stock_refined.index)
+
+    with open(f'../data/tidy/gp_esg_stock_data_frame.pkl', 'wb') as f:
+        pickle.dump(gp_esg_stock_data_frame, f)
 
     
