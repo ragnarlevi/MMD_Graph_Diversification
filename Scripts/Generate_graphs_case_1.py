@@ -30,146 +30,7 @@ from rpy2.robjects.packages import importr
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 rpy2.robjects.numpy2ri.activate()
-spectralGraphTopology = importr('spectralGraphTopology')
-igraph = importr('igraph')
-fingraph = importr('fingraph')
-fitHeavyTail = importr('fitHeavyTail')
 huge = importr('huge')
-
-
-# Define function that ignores degree constraints for the LGMRF. Note this is a R function
-robjects.r('''
-
-library(spectralGraphTopology)
-
-#' @export
-#' @import spectralGraphTopology
-learn_regular_heavytail_graph <- function(X,
-                                          heavy_type = "gaussian", nu = NULL,
-                                          w0 = "naive", d = 1,
-                                          rho = 1, update_rho = TRUE, maxiter = 10000, reltol = 1e-5,
-                                          verbose = TRUE) {
-  X <- as.matrix(X)
-  # number of nodes
-  p <- ncol(X)
-  # number of observations
-  n <- nrow(X)
-  LstarSq <- vector(mode = "list", length = n)
-  for (i in 1:n)
-    LstarSq[[i]] <- Lstar(X[i, ] %*% t(X[i, ])) / (n-1)
-  # w-initialization
-  w <- spectralGraphTopology:::w_init(w0, MASS::ginv(cor(X)))
-  A0 <- A(w)
-  A0 <- A0 / rowSums(A0)
-  w <- spectralGraphTopology:::Ainv(A0)
-  J <- matrix(1, p, p) / p
-  # Theta-initilization
-  Lw <- L(w)
-  Theta <- Lw
-  Y <- matrix(0, p, p)
-  y <- rep(0, p)
-  # ADMM constants
-  mu <- 2
-  tau <- 2
-  # residual vectors
-  primal_lap_residual <- c()
-  primal_deg_residual <- c()
-  dual_residual <- c()
-  # augmented lagrangian vector
-  lagrangian <- c()
-  if (verbose)
-    pb <- progress::progress_bar$new(format = "<:bar> :current/:total  eta: :eta",
-                                     total = maxiter, clear = FALSE, width = 80)
-  elapsed_time <- c()
-  start_time <- proc.time()[3]
-  for (i in 1:maxiter) {
-    # update w
-    LstarLw <- Lstar(Lw)
-    DstarDw <- Dstar(diag(Lw))
-    LstarSweighted <- rep(0, .5*p*(p-1))
-    if (heavy_type == "student") {
-      for (q in 1:n)
-        LstarSweighted <- LstarSweighted + LstarSq[[q]] * compute_student_weights(w, LstarSq[[q]], p, nu)
-    } else if(heavy_type == "gaussian") {
-      for (q in 1:n)
-        LstarSweighted <- LstarSweighted + LstarSq[[q]]
-    }
-    grad <- LstarSweighted - Lstar(rho * Theta + Y) + Dstar(y - rho * d) + rho * (LstarLw + DstarDw)
-    eta <- 1 / (2*rho * (2*p - 1))
-    wi <- w - eta * grad
-    wi[wi < 0] <- 0
-    Lwi <- L(wi)
-    # update Theta
-    eig <- eigen(rho * (Lwi + J) - Y, symmetric = TRUE)
-    V <- eig$vectors
-    gamma <- eig$values
-    Thetai <- V %*% diag((gamma + sqrt(gamma^2 + 4 * rho)) / (2 * rho)) %*% t(V) - J
-    # update Y
-    R1 <- Thetai - Lwi
-    Y <- Y + rho * R1
-    # update y
-    R2 <- diag(Lwi) - d
-    #y <- y + rho * R2
-    # compute primal, dual residuals, & lagrangian
-    primal_lap_residual <- c(primal_lap_residual, norm(R1, "F"))
-    primal_deg_residual <- c(primal_deg_residual, norm(R2, "2"))
-    dual_residual <- c(dual_residual, rho*norm(Lstar(Theta - Thetai), "2"))
-    lagrangian <- c(lagrangian, compute_augmented_lagrangian_ht(wi, LstarSq, Thetai, J, Y, y, d, heavy_type, n, p, rho, nu))
-    # update rho
-    if (update_rho) {
-      s <- rho * norm(Lstar(Theta - Thetai), "2")
-      r <- norm(R1, "F")
-      if (r > mu * s)
-        rho <- rho * tau
-      else if (s > mu * r)
-        rho <- rho / tau
-    }
-    if (verbose)
-      pb$tick()
-    has_converged <- (norm(Lw - Lwi, 'F') / norm(Lw, 'F') < reltol) && (i > 1)
-    elapsed_time <- c(elapsed_time, proc.time()[3] - start_time)
-    if (has_converged)
-      break
-    w <- wi
-    Lw <- Lwi
-    Theta <- Thetai
-  }
-  results <- list(laplacian = L(wi),
-                  adjacency = A(wi),
-                  theta = Thetai,
-                  maxiter = i,
-                  convergence = has_converged,
-                  primal_lap_residual = primal_lap_residual,
-                  primal_deg_residual = primal_deg_residual,
-                  dual_residual = dual_residual,
-                  lagrangian = lagrangian,
-                  elapsed_time = elapsed_time)
-  return(results)
-}
-
-compute_student_weights <- function(w, LstarSq, p, nu) {
-  return((p + nu) / (sum(w * LstarSq) + nu))
-}
-
-compute_augmented_lagrangian_ht <- function(w, LstarSq, Theta, J, Y, y, d, heavy_type, n, p, rho, nu) {
-  eig <- eigen(Theta + J, symmetric = TRUE, only.values = TRUE)$values
-  Lw <- L(w)
-  Dw <- diag(Lw)
-  u_func <- 0
-  if (heavy_type == "student") {
-    for (q in 1:n)
-      u_func <- u_func + (p + nu) * log(1 + n * sum(w * LstarSq[[q]]) / nu)
-  } else if (heavy_type == "gaussian"){
-    for (q in 1:n)
-      u_func <- u_func + sum(n * w * LstarSq[[q]])
-  }
-  u_func <- u_func / n
-  return(u_func - sum(log(eig)) + sum(y * (Dw - d)) + sum(diag(Y %*% (Theta - Lw)))
-         + .5 * rho * (norm(Dw - d, "2")^2 + norm(Lw - Theta, "F")^2))
-}
-
-''')
-
 
 
 robjects.r('''
@@ -477,20 +338,20 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
   """
   # information stored in dictionaries
   stocks_considered= dict()
-  #for port_type in ['uniform', 'sharpe', 'gmv']:
-    # portfolios_reg_info[port_type] = {}
-    # for j in reg_interval:
-    #   j = int(j)
-    #   portfolios_reg_info[port_type][j] = {}
-    #   portfolios_reg_info[port_type][j]['weights'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['cov_div'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['var_div'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['omega'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['sharpe'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['sortino'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['beta'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['treynor'] = {i: [] for i in range(nr_splits)}
-    #   portfolios_reg_info[port_type][j]['max_draw'] = {i: [] for i in range(nr_splits)}
+  for port_type in ['uniform', 'sharpe', 'gmv']:
+    portfolios_reg_info[port_type] = {}
+    for j in reg_interval:
+      j = int(j)
+      portfolios_reg_info[port_type][j] = {}
+      portfolios_reg_info[port_type][j]['weights'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['cov_div'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['var_div'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['omega'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['sharpe'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['sortino'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['beta'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['treynor'] = {i: [] for i in range(nr_splits)}
+      portfolios_reg_info[port_type][j]['max_draw'] = {i: [] for i in range(nr_splits)}
 
 
     # determine which stocks in the sector will be considered.
@@ -610,8 +471,7 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
       if i == window_size:
         print(var.shape)
 
-      
-
+    
 
       esg_split_i_mean = esg_df[stocks_ordered_i[stocks_index]].loc[esg_df.index == price_df.index[i]].mean(axis = 1)[0]
       esg_mean[i_split][i_cnt] = esg_split_i_mean
@@ -630,41 +490,8 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
       X = np.array(stock_split_i)
       
       
-      if graph_estimation == 'lgmrf_heavy':
-        # Find nu for multivariate t-student
-        out_fit_mvt = fitHeavyTail.fit_mvt(X,nu="MLE-diag-resample")
-        out_fit_mvt = dict(zip(out_fit_mvt.names, list(out_fit_mvt)))
-        if d == 0:
-          out = learn_heavy_connected_graph(X, heavy_type = "student", nu = out_fit_mvt['nu'][0], verbose = False)
-          out = dict(zip(out.names, list(out)))
-          precision_matrix = out['laplacian']
-          G = create_G(out['adjacency'])
-          graph_dict[i_split].append(G)
-        else:
-          out = fingraph.learn_regular_heavytail_graph(X, heavy_type = "student", nu = out_fit_mvt['nu'][0], d=d, verbose = False)
-          out = dict(zip(out.names, list(out)))
-          precision_matrix = out['laplacian']
-          G = create_G(out['adjacency'])
-          graph_dict[i_split].append(G)
+      if graph_estimation == 'huge_glasso_ebic':
 
-      elif graph_estimation == 'lgmrf_normal':
-        out = fingraph.learn_regular_heavytail_graph(X, heavy_type = "gaussian", d=d, verbose = False)
-        out = dict(zip(out.names, list(out)))
-        precision_matrix = out['laplacian']
-        G = create_G(out['adjacency'])
-        graph_dict[i_split].append(G)
-
-      elif graph_estimation == 'sklearn_glasso':
-        glasso = GraphicalLassoCV(cv=3).fit(X)
-        precision_matrix = glasso.precision_
-        precision_matrix_no_diag = precision_matrix.copy()
-        np.fill_diagonal(precision_matrix_no_diag,0)
-        G = create_G(-precision_matrix_no_diag)
-        graph_dict[i_split].append(G)
-      elif graph_estimation == 'huge_glasso_ebic':
-        # out = huge.huge(X, method = 'glasso', nlambda = nlambda,verbose = False, lambda_min_ratio = 0.001)
-        # out_select = huge.huge_select(out, criterion = "ebic",ebic_gamma = 0.1 )
-        # out_select = dict(zip(out_select.names, list(out_select)))
         out_select = my_huge(X, gamma = ebic_gamma, lamda = lamda, scale = scale)
         out_select = dict(zip(out_select.names, list(out_select)))
         where_optimal = int(np.where(out_select['opt.lambda'][0] == out_select['lambda'])[0][0])
@@ -691,10 +518,6 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
         mu = np.mean(stock_split_i, axis=0)
         G = create_G(-precision_matrix_no_diag, returns=mu)
         graph_dict[i_split][i_cnt] = G
-        #G = create_G(-precision_matrix.copy(), returns=mu)
-        #graph_dict2[i_split].append(G)
-        #G = create_G(-precision_matrix.copy(), returns=mu)
-        #graph_covdict[i_split].append(create_G(np.linalg.inv(precision_matrix.copy()), returns=mu))
 
 
       #scaler = StandardScaler()
@@ -736,83 +559,28 @@ def graph_est(price_df, esg_df, all_stocks_in_sector, k,d = 1, window_size = 150
 
     
 
-      # for j in reg_interval:
-      #   j = int(j)
-      #   for port_type in ['uniform', 'sharpe', 'gmv']:
-      #     S = np.linalg.inv(out_select['icov'][j])
-      #     if scale:
-      #       S = np.dot(np.diag(var), S).dot(np.diag(var))
-      #     w, mu_p, var_p = portfolio(S, np.linalg.inv(S), mu, np.array(stock_split_i), port_type)
-      #     r_p = np.dot(np.array(stock_split_i),w)
-      #     portfolios_reg_info[port_type][j]['weights'][i_split].append(w)
-      #     portfolios_reg_info[port_type][j]['cov_div'][i_split].append(div_ratio(w,S))
-      #     portfolios_reg_info[port_type][j]['var_div'][i_split].append(var_div_ratio(w,np.array(stock_split_i)))
-      #     portfolios_reg_info[port_type][j]['sharpe'][i_split].append(sharpe(mu_p, np.sqrt(var_p)))
-      #     portfolios_reg_info[port_type][j]['omega'][i_split].append(omega(r_p))
-      #     portfolios_reg_info[port_type][j]['sortino'][i_split].append(sortino(mu_p, r_p))
-      #     beta_p = beta(r_p, snp500_i)
-      #     portfolios_reg_info[port_type][j]['beta'][i_split].append(beta_p)
-      #     portfolios_reg_info[port_type][j]['treynor'][i_split].append(treynor(mu_p, beta_p))
-      #     portfolios_reg_info[port_type][j]['max_draw'][i_split].append(max_drawdown(r_p))
+      for j in reg_interval:
+        j = int(j)
+        for port_type in ['uniform', 'sharpe', 'gmv']:
+          S = np.linalg.inv(out_select['icov'][j])
+          if scale:
+            S = np.dot(np.diag(var), S).dot(np.diag(var))
+          w, mu_p, var_p = portfolio(S, np.linalg.inv(S), mu, np.array(stock_split_i), port_type)
+          r_p = np.dot(np.array(stock_split_i),w)
+          portfolios_reg_info[port_type][j]['weights'][i_split].append(w)
+          portfolios_reg_info[port_type][j]['cov_div'][i_split].append(div_ratio(w,S))
+          portfolios_reg_info[port_type][j]['var_div'][i_split].append(var_div_ratio(w,np.array(stock_split_i)))
+          portfolios_reg_info[port_type][j]['sharpe'][i_split].append(sharpe(mu_p, np.sqrt(var_p)))
+          portfolios_reg_info[port_type][j]['omega'][i_split].append(omega(r_p))
+          portfolios_reg_info[port_type][j]['sortino'][i_split].append(sortino(mu_p, r_p))
+          beta_p = beta(r_p, snp500_i)
+          portfolios_reg_info[port_type][j]['beta'][i_split].append(beta_p)
+          portfolios_reg_info[port_type][j]['treynor'][i_split].append(treynor(mu_p, beta_p))
+          portfolios_reg_info[port_type][j]['max_draw'][i_split].append(max_drawdown(r_p))
 
     print(robjects.r.gc())
     del out_select
     i_cnt +=1
-    #del my_huge
-    #my_huge = robjects.globalenv["my_huge"]
-    # if ((i % 50) == 0) & (i!= window_size):
-    #   print("Save tmp")
-    #   dates = np.array(dates4)
-
-    #   assert len(graph_dict[0]) == len(graph_dict[1]), f"{k} 0 and 1 not same"
-    #   assert len(graph_dict[0]) == len(graph_dict[2]), f"{k} 0 and 2 not same"
-    #   assert len(graph_dict[1]) == len(graph_dict[2]), f"{k} 1 and 2 not same"
-
-
-    #   data = {'dates':dates, 'graph_dict':graph_dict, 'graph_dict2':graph_dict2, 'sector':k, 'cov_dict':cov_dict, 'prec_dict':prec_dict, 'esg_mean':esg_mean, 'esg_std':esg_std,
-    #   'esg_max':esg_max, 'esg_min':esg_min,'transform':transform,'scale':scale,
-    #   'prec_dict_plus_1':prec_dict_plus_1, 'prec_dict_minus_1':prec_dict_minus_1, 'opt_lambda':opt_lambda, 'reg_lambda':reg_lambda,
-    #   'return_dict':return_dict, 'window_size':window_size, 'stock_partition':stock_partition, 'portfolios_info':portfolios_info,
-    #   'portfolios_reg_info':portfolios_reg_info, 'graph_covdict':graph_covdict, 'where_opt':where_opt_dict}
-
-
-      
-    #   with open(f'data/Graphs/{k}_{order_esg}_d_{d}_winlen_{window_size}_gest_{graph_estimation}_scale_{scale}_trans_{transform}_{i}.pkl', 'wb') as f:
-    #     pickle.dump(data, f)    
-
-    #   del data
-
-    #   graph_dict = {i: [] for i in range(nr_splits)}
-    #   graph_dict2 = {i: [] for i in range(nr_splits)}
-    #   return_dict  = {i: [] for i in range(nr_splits)}
-    #   esg_mean = {i: [] for i in range(nr_splits)}
-    #   esg_std = {i: [] for i in range(nr_splits)}
-    #   esg_max = {i: [] for i in range(nr_splits)}
-    #   esg_min = {i: [] for i in range(nr_splits)}
-    #   cov_dict = {i: [] for i in range(nr_splits)}
-    #   prec_dict = {i: [] for i in range(nr_splits)}
-    #   prec_dict_plus_1 = {i: [] for i in range(nr_splits)}
-    #   prec_dict_minus_1 = {i: [] for i in range(nr_splits)}
-    #   opt_lambda = {i: [] for i in range(nr_splits)}
-    #   reg_lambda = {i: [] for i in range(nr_splits)}
-    #   graph_covdict = {i: [] for i in range(nr_splits)}
-    #   where_opt_dict = {i: [] for i in range(nr_splits)}
-    #   where_opt_lambda_dict = {i: [] for i in range(nr_splits)}
-
-    #   portfolios_info = {}
-    #   portfolios_reg_info = {}
-
-    #   for port_type in ['uniform', 'sharpe', 'gmv']:
-    #     portfolios_info[port_type] = {}
-    #     portfolios_info[port_type]['weights'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['cov_div'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['var_div'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['omega'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['sharpe'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['sortino'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['beta'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['treynor'] = {i: [] for i in range(nr_splits)}
-    #     portfolios_info[port_type]['max_draw'] = {i: [] for i in range(nr_splits)}
             
 
   dates = np.array(price_df.index[the_range])
@@ -852,8 +620,6 @@ if __name__ == '__main__':
   winow_len = 300
   graph_estimation = 'huge_glasso_ebic'
 
-  #scale = True
-  #transform = None#'nonparanormal'
 
 
   print(graph_estimation)
@@ -861,40 +627,10 @@ if __name__ == '__main__':
   print(sector_classification.keys())
 
 
-  # with Pool(2) as pool:
-  #   L = pool.starmap(graph_est, [(price_pivot.loc[:, np.isin(price_pivot.columns,spit_assets(k, sector_classification))], 
-  #                                 gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,spit_assets(k, sector_classification))], 
-  #                                 spit_assets(k, sector_classification), 
-  #                                   k, 
-  #                                   d,
-  #                                   winow_len, 
-  #                                   3,
-  #                                   graph_estimation,
-  #                                   scale,
-  #                                   transform,
-  #                                   lamda,
-  #                                   0.01,
-  #                                   order_esg) for k,scale,transform,lamda,order_esg in [('all', False, 'nonparanormal', np.exp(np.linspace(start = np.log(1e-3), stop = np.log(1e-5), num = 100)), False),
-  #                                                                                        ('all', False, 'nonparanormal', np.exp(np.linspace(start = np.log(1e-3), stop = np.log(1e-5), num = 100)), True)]])
 
 
-  # graph_est(price_pivot.loc[:, np.isin(price_pivot.columns,spit_assets('all', sector_classification))],
-  #           gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,spit_assets('all', sector_classification))],
-  #           spit_assets('all', sector_classification),
-  #           'all',
-  #           d,
-  #           winow_len,
-  #           3,
-  #           graph_estimation,
-  #           False,
-  #           'nonparanormal',
-  #           np.exp(np.linspace(start = np.log(1e-3), stop = np.log(5e-5), num = 50)),
-  #           0.1,
-  #           False
-  #           )
-
-  graph_est(price_pivot.loc[:, np.isin(price_pivot.columns,spit_assets('all', sector_classification))],
-            gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,spit_assets('all', sector_classification))],
+  graph_est(price_pivot.loc[:, np.isin(price_pivot.columns,spit_assets('Industrials', sector_classification))],
+            gp_esg_stock.loc[:, np.isin(gp_esg_stock.columns,spit_assets('Industrials', sector_classification))],
             spit_assets('all', sector_classification),
             'all',
             d,
