@@ -1,10 +1,8 @@
-from operator import truediv
-from numpy.lib.utils import info
+
 import pandas as pd
 
 import time
-import datetime
-import importlib
+
 import os, sys
 import tqdm
 # from pandas_datareader import data
@@ -13,16 +11,11 @@ sys.path.insert(0, 'C:/Users/User/Code/MMD_Graph_Diversification')
 import pickle
 import grakel as gk
 
-from sklearn.covariance import graphical_lasso, GraphicalLasso, GraphicalLassoCV
-
-
-from sklearn.covariance import GraphicalLassoCV
-from sklearn.preprocessing import StandardScaler
 
 import warnings
 
 
-from multiprocessing import Pool, freeze_support
+from multiprocessing import Pool,
 
 
 
@@ -1382,129 +1375,6 @@ if __name__ == '__main__':
                                          (ind_data_dict,'Industrials','nonparanormal', False, 'return', 'graph_dict', 'sp', {'round_node':1, 'round_edge':2}, False)
                                          
                                          ]])
-    # with Pool(10) as pool:
-    #     L = pool.starmap(graph_test, [( data_dict, study, transform, scale,
-    #                                     n, 
-    #                                     gtype,  
-    #                                     ptype,
-    #                                     B,
-    #                                     edge_attr,
-    #                                     day_step,
-    #                                     graph_label,
-    #                                     do_tensor,
-    #                                     kernel_params) for  data_dict, study, transform, scale, ptype, gtype, graph_label, kernel_params, do_tensor in 
-    #                                     [
-    #                                      (bm_data_dict,'Basic Materials','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (cs_data_dict,'Communication Services','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (cc_data_dict,'Consumer Cyclical','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (cd_data_dict,'Consumer Defensive','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (re_data_dict,'Real Estate','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (health_data_dict,'Healthcare','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (energy_data_dict,'Energy','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (tech_data_dict,'Technology','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (fs_data_dict,'Financial Services','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-    #                                      (ind_data_dict,'Industrial','nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-                                         
-    #                                      (bm_data_dict,'Basic Materials','nonparanormal', False, 'return', 'graph_dict', 'wl', { 'h':2}, False),
-    #                                      (cs_data_dict,'Communication Services','nonparanormal', False, 'return', 'graph_dict', 'wl', {'h':2}, False),
-    #                                      (cc_data_dict,'Consumer Cyclical','nonparanormal', False, 'return', 'graph_dict', 'wl', { 'h':2}, False),
-    #                                      (cd_data_dict,'Consumer Defensive','nonparanormal', False, 'return', 'graph_dict', 'wl', { 'h':2}, False),
-    #                                      (re_data_dict,'Real Estate','nonparanormal', False, 'return', 'graph_dict', 'wl', { 'h':2}, False),
-    #                                      (health_data_dict,'Healthcare','nonparanormal', False, 'return', 'graph_dict', 'wl', { 'h':2}, False),
-    #                                      (energy_data_dict,'Energy','nonparanormal', False, 'return', 'graph_dict', 'wl', { 'h':2}, False),
-    #                                      (tech_data_dict,'Technology','nonparanormal', False, 'return', 'graph_dict', 'wl', {'h':2}, False),
-    #                                      (fs_data_dict,'Financial Services','nonparanormal', False, 'return', 'graph_dict', 'wl', {'h':2}, False),
-    #                                      (ind_data_dict,'Industrial','nonparanormal', False, 'return', 'graph_dict', 'wl', {'h':2}, False),
 
-    #                                      (bm_data_dict,'Basic Materials','nonparanormal', False, 'return', 'graph_dict', 'wloa', { 'h':2}, False),
-    #                                      (cs_data_dict,'Communication Services','nonparanormal', False, 'return', 'graph_dict', 'wloa', {'h':2}, False),
-    #                                      (cc_data_dict,'Consumer Cyclical','nonparanormal', False, 'return', 'graph_dict', 'wloa', { 'h':2}, False),
-    #                                      (cd_data_dict,'Consumer Defensive','nonparanormal', False, 'return', 'graph_dict', 'wloa', { 'h':2}, False),
-    #                                      (re_data_dict,'Real Estate','nonparanormal', False, 'return', 'graph_dict', 'wloa', { 'h':2}, False),
-    #                                      (health_data_dict,'Healthcare','nonparanormal', False, 'return', 'graph_dict', 'wloa', { 'h':2}, False),
-    #                                      (energy_data_dict,'Energy','nonparanormal', False, 'return', 'graph_dict', 'wloa', { 'h':2}, False),
-    #                                      (tech_data_dict,'Technology','nonparanormal', False, 'return', 'graph_dict', 'wloa', {'h':2}, False),
-    #                                      (fs_data_dict,'Financial Services','nonparanormal', False, 'return', 'graph_dict', 'wloa', {'h':2}, False),
-    #                                      (ind_data_dict,'Industrial','nonparanormal', False, 'return', 'graph_dict', 'wloa', {'h':2}, False),
-
-
-    #                                      (bm_data_dict,'Basic Materials','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (cs_data_dict,'Communication Services','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (cc_data_dict,'Consumer Cyclical','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (cd_data_dict,'Consumer Defensive','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (re_data_dict,'Real Estate','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (health_data_dict,'Healthcare','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (energy_data_dict,'Energy','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (tech_data_dict,'Technology','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (fs_data_dict,'Financial Services','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-    #                                      (ind_data_dict,'Industrial','nonparanormal', False, 'return', 'graph_dict', 'wwl', {'w':0.1, 'h':2}, False),
-
-    #                                      (bm_data_dict,'Basic Materials','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (cs_data_dict,'Communication Services','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (cc_data_dict,'Consumer Cyclical','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (cd_data_dict,'Consumer Defensive','nonparanormal', False, 'return', 'graph_dict', 'pyramid',{'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (re_data_dict,'Real Estate','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (health_data_dict,'Healthcare','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (energy_data_dict,'Energy','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (tech_data_dict,'Technology','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (fs_data_dict,'Financial Services','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-    #                                      (ind_data_dict,'Industrial','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-
-    #                                      (bm_data_dict,'Basic Materials','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (cs_data_dict,'Communication Services','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (cc_data_dict,'Consumer Cyclical','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (cd_data_dict,'Consumer Defensive','nonparanormal', False, 'return', 'graph_dict', 'pyramid',{'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (re_data_dict,'Real Estate','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (health_data_dict,'Healthcare','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (energy_data_dict,'Energy','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (tech_data_dict,'Technology','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (fs_data_dict,'Financial Services','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-    #                                      (ind_data_dict,'Industrial','nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False),
-
-    #                                      ]])
-
-
-
-# ('nonparanormal', False, 'uniform', 'graph_dict', 'rw', {'c':10e-6}, False) ,
-#                                         ('nonparanormal', False, 'returns', 'graph_dict', 'rw', {'c':10e-8}, False) ,
-#                                            ('nonparanormal', False, 'return', 'graph_dict', 'prop', {'w':0.0001, 't_max':6}, False),
-#                                            ('nonparanormal', False, 'return', 'graph_dict', 'prop', {'w':0.0001, 't_max':6}, True),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'sp', {'round_node':1, 'round_edge':2}, True),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'sp', {'round_node':1, 'round_edge':2}, False),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, True),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'sp_attr', {'round_node':1, 'round_edge':2}, False),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'wloa_bin', {'round_node':1, 'round_edge':2, 'h':2}, True),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'wloa_bin', {'round_node':1, 'round_edge':2, 'h':2}, False),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'wloa', {'round_node':1, 'round_edge':2, 'h':2}, True),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'wloa', {'round_node':1, 'round_edge':2, 'h':2}, False),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':False}, False),
-#                                          ('nonparanormal', False, 'return', 'graph_dict', 'pyramid', {'L':8, 'd':6, 'with_labels':True}, False)
-
-    # kernel_params = {'w_edge':-0.1, 'w_node':-1000}
-    # with Pool(6) as pool:
-    #     L = pool.starmap(kernel_test_iteration, [(i, data_dict, study, 'nonparanormal', False,
-    #                                     n, 
-    #                                     'graph_dict',  
-    #                                     'return',
-    #                                     B,
-    #                                     edge_attr,
-    #                                     day_step,
-    #                                     'sp_attr',
-    #                                     False,
-    #                                     kernel_params) for  i in range(20, len(data_dict['graph_dict'][0]), 10)])
-
-    # test_info = pd.concat(L, ignore_index= True)
-
-    # L= {'info_dict':test_info, 'sector':study, 'n':n}
-
-
-    # path = f'data/mmd_test/{study}/True_d_{1}_winlen_{300}_gest_{"huge_glasso_ebic"}_scale_{True}_trans_{"nonparanormal"}_gname_{"graph_dict"}_n_{n}_B_{B}_dstep_{day_step}_glabel_{"sp_attr"}_p_{"return"}'
-
-    # for k,v in kernel_params.items():
-    #     path = path + f"_{k}" + f"_{v}"
-    # path = path + ".pkl"
-
-    # with open(path, 'wb') as f:
-    #     pickle.dump(L, f)
 
 
